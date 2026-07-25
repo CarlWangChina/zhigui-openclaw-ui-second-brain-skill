@@ -1,4 +1,3 @@
-# zhigui-openclaw-ui-second-brain-skill
 
 # ZhiGui — A Second Brain That Helps You Decide Today and Plan Tomorrow
 
