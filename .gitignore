@@ -1,5 +1,5 @@
-# === Dependencies (included in repo for out-of-box use) ===
-# node_modules/  — intentionally included so users don't need npm install
+# === Dependencies (install via npm on first run) ===
+node_modules/
 
 # === IDE / local tool configs (contain machine-specific paths) ===
 .trae/
@@ -26,12 +26,3 @@ ehthumbs.db
 
 # === Windows junk (reserved-name files from stray redirections) ===
 nul
-
-# === OS metadata ===
-Thumbs.db
-ehthumbs.db
-.DS_Store
-
-# === Local environment files (may contain secrets) ===
-.env
-.env.*
