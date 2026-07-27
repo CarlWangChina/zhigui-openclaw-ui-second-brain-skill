@@ -47,6 +47,9 @@ if [ ! -f "$APP_DIR/node_modules/electron/dist/electron" ]; then
     export ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
     cd "$APP_DIR"
     "$NPM_CMD" install --registry=https://registry.npmmirror.com
+    echo ""
+    echo "  正在下载 Electron 二进制文件..."
+    "$NODE_EXE" "$APP_DIR/node_modules/electron/install.js"
     if [ ! -f "$APP_DIR/node_modules/electron/dist/electron" ]; then
         echo ""
         echo "  [错误] Electron 安装失败。"
