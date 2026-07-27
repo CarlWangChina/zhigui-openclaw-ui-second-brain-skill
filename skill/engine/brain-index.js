@@ -104,7 +104,7 @@ class BrainIndex {
     }
   }
 
-  // Update library (add/modify categories and topics) — called by lingxi_update_library
+  // Update library (add/modify categories and topics) — called by zhigui_update_library
   updateLibrary(changes) {
     const library = this._readLibrary();
     const stats = { categoriesAdded: 0, topicsAdded: 0, topicsUpdated: 0 };
@@ -909,7 +909,7 @@ class BrainIndex {
     if (result.length === 0 && matchingTopics.length === 0) return { hasContext: false, items: [] };
     return {
       hasContext: true, items: result, matchingTopics,
-      hint: 'Entities linked to your specified topics. Use lingxi_get_note_detail / lingxi_get_goal_detail for full content.',
+      hint: 'Entities linked to your specified topics. Use zhigui_get_note_detail / zhigui_get_goal_detail for full content.',
     };
   }
 

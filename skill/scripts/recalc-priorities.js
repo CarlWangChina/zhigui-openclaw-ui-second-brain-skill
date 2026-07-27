@@ -1,12 +1,12 @@
 /**
- * Lingxi deadline refresh script (standalone / daily inspection fallback)
+ * ZhiGui deadline refresh script (standalone / daily inspection fallback)
  *
  * Reads state via unified Storage module, refreshes daysLeft / overdue for all
  * currentGoals, and backfills missing priorities with a neutral default (50).
  * The engine no longer applies rule-based priority formulas; AI/user owns the scores.
  *
  * This is the standalone fallback for "no MCP environment" (cron / manual / daily
- * automation). When MCP is available, prefer lingxi_recalc_priorities.
+ * automation). When MCP is available, prefer zhigui_recalc_priorities.
  *
  * Uses the unified Storage module (same as MCP, Dashboard, Electron) to ensure
  * all three ends see consistent data.

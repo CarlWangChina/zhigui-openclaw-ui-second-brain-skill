@@ -1,8 +1,8 @@
 /**
- * Compatibility entry point for the isolated Lingxi test suite.
+ * Compatibility entry point for the isolated ZhiGui test suite.
  *
  * All tests use temporary data directories. Running this file never mutates
- * the dashboard data under .lingxi.
+ * the dashboard data under .zhigui.
  */
 const { spawnSync } = require('child_process');
 const path = require('path');
@@ -21,4 +21,4 @@ for (const file of testFiles) {
   }
 }
 
-console.log('PASS all isolated Lingxi tests');
+console.log('PASS all isolated ZhiGui tests');

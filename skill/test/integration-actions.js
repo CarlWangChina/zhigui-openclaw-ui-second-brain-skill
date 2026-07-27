@@ -7,7 +7,7 @@ const { ensureDataInitialized } = require('../lib/init-data');
 const Storage = require('../engine/storage');
 const Actions = require('../engine/actions');
 
-const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lingxi-actions-'));
+const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zhigui-actions-'));
 
 function json(file) {
   return JSON.parse(fs.readFileSync(path.join(testDir, file), 'utf8'));

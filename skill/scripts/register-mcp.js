@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Lingxi · Auto-register MCP Server
+ * ZhiGui · Auto-register MCP Server
  *
- * Writes the lingxi MCP server into the global MCP config (~/.lingxi-mcp.json),
- * so any agent in any workspace can call lingxi_* tools directly — no manual config editing.
+ * Writes the zhigui MCP server into the global MCP config (~/.zhigui-mcp.json),
+ * so any agent in any workspace can call zhigui_* tools directly — no manual config editing.
  *
  * Usage:
  *   node <skillDir>/scripts/register-mcp.js [skillDir] [nodeExe]
@@ -31,7 +31,7 @@ function register(skillDir, nodeExe) {
   const enginePath = path.join(skillDir, 'engine', 'server.js').replace(/\\/g, '/');
 
   const home = process.env.HOME || process.env.USERPROFILE;
-  const globalMcpPath = path.join(home, '.lingxi-mcp.json');
+  const globalMcpPath = path.join(home, '.zhigui-mcp.json');
 
   let cfg = { mcpServers: {} };
   try {
@@ -41,8 +41,8 @@ function register(skillDir, nodeExe) {
     // Global mcp config does not exist yet; create new
   }
 
-  const existed = !!cfg.mcpServers.lingxi;
-  cfg.mcpServers.lingxi = {
+  const existed = !!cfg.mcpServers.zhigui;
+  cfg.mcpServers.zhigui = {
     command: nodeExe,
     args: [enginePath],
     env: {},
@@ -51,11 +51,11 @@ function register(skillDir, nodeExe) {
   fs.mkdirSync(path.dirname(globalMcpPath), { recursive: true });
   fs.writeFileSync(globalMcpPath, JSON.stringify(cfg, null, 2), 'utf8');
 
-  console.log(`[Lingxi] MCP server ${existed ? 'updated' : 'registered'}: lingxi`);
+  console.log(`[ZhiGui] MCP server ${existed ? 'updated' : 'registered'}: zhigui`);
   console.log(`  engine : ${enginePath}`);
   console.log(`  command: ${nodeExe}`);
   console.log(`  config : ${globalMcpPath}`);
-  console.log(`  Next   : register lingxi in your AI tool's MCP settings (see SKILL.md "Installation & Setup").`);
+  console.log(`  Next   : register zhigui in your AI tool's MCP settings (see SKILL.md "Installation & Setup").`);
   return { globalMcpPath, enginePath, nodeExe };
 }
 

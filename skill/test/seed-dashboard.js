@@ -12,7 +12,7 @@ tomorrowDate.setUTCDate(tomorrowDate.getUTCDate() + 1);
 const tomorrow = tomorrowDate.toISOString().slice(0, 10);
 
 // This script is a development fixture generator. It only resets the configured
-// Lingxi data directory and is never invoked by normal application startup.
+// ZhiGui data directory and is never invoked by normal application startup.
 fs.rmSync(dataDir, { recursive: true, force: true });
 ensureDataInitialized(dataDir);
 Storage.setDataDir(dataDir);

@@ -1,4 +1,4 @@
 interface:
-  display_name: "Lingxi Decision Companion"
+  display_name: "ZhiGui Decision Companion"
   short_description: "Think clearly, compare options, and build adaptable plans"
-  default_prompt: "Use $lingxi to help me weigh this decision and create a flexible next-step plan."
+  default_prompt: "Use $zhigui to help me weigh this decision and create a flexible next-step plan."

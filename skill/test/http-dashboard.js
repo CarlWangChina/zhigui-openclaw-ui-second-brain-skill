@@ -4,12 +4,12 @@ const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 
-const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lingxi-http-'));
+const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zhigui-http-'));
 const port = 17888 + Math.floor(Math.random() * 500);
 const base = `http://127.0.0.1:${port}`;
 const child = spawn(process.execPath, ['dashboard/server.js'], {
   cwd: path.join(__dirname, '..'),
-  env: { ...process.env, LINGXI_DATA_DIR: testDir, LINGXI_PORT: String(port) },
+  env: { ...process.env, ZHIGUI_DATA_DIR: testDir, ZHIGUI_PORT: String(port) },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 

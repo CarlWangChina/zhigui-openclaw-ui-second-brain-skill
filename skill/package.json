@@ -1,5 +1,5 @@
 {
-  "name": "lingxi-skill",
+  "name": "zhigui-skill",
   "version": "1.0.0",
   "description": "ZhiGui 知归 - Decision & Planning Companion - self-contained skill package (engine + dashboard + Electron)",
   "private": true,

@@ -5,8 +5,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lingxi-goals-'));
-process.env.LINGXI_DATA_DIR = testDir;
+const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zhigui-goals-'));
+process.env.ZHIGUI_DATA_DIR = testDir;
 
 const { ensureDataInitialized } = require('../lib/init-data');
 const Actions = require('../engine/actions');
@@ -27,7 +27,7 @@ function today() { return new Date().toISOString().slice(0, 10); }
     // 2) Sub-goal (currentGoal) linked to the strategic goal
     const sub = Actions.execute('goal.add', { type: 'currentGoal', title: '数学一轮复习' });
     const subId = sub.goal.id;
-    // link it like the MCP lingxi_add_goal would
+    // link it like the MCP zhigui_add_goal would
     const state = Storage.readFullState();
     const subGoal = state.currentGoals.find(g => g.id === subId);
     subGoal.relatedStrategicGoalId = sgId;
@@ -72,7 +72,7 @@ function today() { return new Date().toISOString().slice(0, 10); }
     const node = process.execPath;
     const out = execFileSync(node, ['scripts/recalc-priorities.js'], {
       cwd: path.join(__dirname, '..'),
-      env: { ...process.env, LINGXI_DATA_DIR: testDir },
+      env: { ...process.env, ZHIGUI_DATA_DIR: testDir },
     }).toString();
     assert.ok(out.includes('recalc') || out.includes('priority') || out.includes('done') || out.length >= 0, 'recalc script output');
 

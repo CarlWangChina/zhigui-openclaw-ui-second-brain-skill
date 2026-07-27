@@ -1,11 +1,11 @@
 {
-  "_comment": "Lingxi MCP Server cross-platform config template — copy the config for your tool and replace <skill_directory> with the actual absolute path",
+  "_comment": "ZhiGui MCP Server cross-platform config template — copy the config for your tool and replace <skill_directory> with the actual absolute path",
 
   "trae": {
     "_config_file": "Trae Settings > MCP > Add > Manual Add",
     "_note": "In Trae: Settings > MCP > Add > Manual Add, then paste the JSON. If 'node' is not on PATH, use the absolute path to node.exe (forward slashes recommended).",
     "mcpServers": {
-      "lingxi": {
+      "zhigui": {
         "command": "node",
         "args": ["<skill_directory>/engine/server.js"]
       }
@@ -15,7 +15,7 @@
   "generic_mcp": {
     "_note": "Standard MCP stdio config — works with any MCP-compatible AI tool. Refer to your tool's docs for where to paste this.",
     "mcpServers": {
-      "lingxi": {
+      "zhigui": {
         "command": "node",
         "args": ["<skill_directory>/engine/server.js"]
       }

@@ -16,7 +16,7 @@
  *
  * Flow:
  *   1. readState() returns lightweight state with indexes (not full content)
- *   2. When AI needs goal detail → lingxi_get_goal_detail(id) → reads goals/g_xxx.json
+ *   2. When AI needs goal detail → zhigui_get_goal_detail(id) → reads goals/g_xxx.json
  *   3. When conflict detection needs a day → getDaySchedule("2026-08-01") → reads schedule/2026-08-01.json
  *   4. writeGoal() splits into index entry + detail file automatically
  */

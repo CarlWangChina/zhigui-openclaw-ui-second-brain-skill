@@ -34,7 +34,7 @@ function computeChecksum(jsonString) {
 /**
  * Export all ZhiGui data to a portable JSON object.
  *
- * @param {string} dataDir - The .lingxi data directory path
+ * @param {string} dataDir - The .zhigui data directory path
  * @param {object} [options={}]
  * @param {string} [options.outputPath] - File path to write the export to (optional)
  * @returns {object} The export object with meta, state, history, topicIndex
@@ -86,7 +86,7 @@ function exportData(dataDir, options = {}) {
     meta: {
       version: VERSION,
       exportedAt,
-      source: 'lingxi-export',
+      source: 'zhigui-export',
       // checksum placeholder — filled in after serialization
       checksum: '',
     },
@@ -125,7 +125,7 @@ function exportData(dataDir, options = {}) {
 /**
  * Import data from a previously exported JSON object.
  *
- * @param {string} dataDir - The .lingxi data directory path
+ * @param {string} dataDir - The .zhigui data directory path
  * @param {object} importObj - The export object to import
  * @param {object} [options={}]
  * @param {'replace'|'merge'} [options.mode='replace'] - Import mode

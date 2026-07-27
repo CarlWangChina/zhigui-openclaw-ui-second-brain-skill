@@ -37,7 +37,7 @@ function buildOverview(state, brain) {
   }));
 
   // Constraints: title-only on purpose. The full rule body lives in goals.json and
-  // is fetched on demand via lingxi_get_document_by_type('goals').
+  // is fetched on demand via zhigui_get_document_by_type('goals').
   const constraints = (state.constraints || []).map(c => ({
     id: c.id,
     title: c.title,
@@ -120,7 +120,7 @@ function buildOverview(state, brain) {
     topics,
     notes,
     pendingReviews,
-    hint: 'LAYER-0 manifest: note titles and classifications tell you WHAT exists; note bodies are deliberately absent. Load one body only when relevant with lingxi_get_note_detail(noteId), or a selected topic with lingxi_get_topic_document(topicId). Pending reviews are proposals that require user confirmation; do not apply them silently.',
+    hint: 'LAYER-0 manifest: note titles and classifications tell you WHAT exists; note bodies are deliberately absent. Load one body only when relevant with zhigui_get_note_detail(noteId), or a selected topic with zhigui_get_topic_document(topicId). Pending reviews are proposals that require user confirmation; do not apply them silently.',
   };
 }
 

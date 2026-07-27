@@ -2,14 +2,14 @@
 node_modules/
 
 # === Local runtime data (user-specific — never publish) ===
-.lingxi/
 .zhigui/
-.workbuddy/
+.lingxi/
 
 # === IDE / local tool configs (contain machine-specific paths) ===
 .trae/
 .cursor/
 .mcp.json
+.workbuddy/
 
 # === Backups ===
 backups/
@@ -34,3 +34,7 @@ nul
 Thumbs.db
 ehthumbs.db
 .DS_Store
+
+# === Local environment files (may contain secrets) ===
+.env
+.env.*

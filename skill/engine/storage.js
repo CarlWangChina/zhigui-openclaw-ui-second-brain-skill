@@ -1,5 +1,5 @@
 /**
- * Lingxi - Shared persistence and projection layer
+ * ZhiGui - Shared persistence and projection layer
  *
  * Solves the "dual-storage divergence": the Electron panel's manual edits only write to
  * state.json, while the AI/MCP layer primarily reads the split documents (goals.json /
@@ -335,7 +335,7 @@ function updateIndexTimestamp(docType) {
       idx = JSON.parse(fs.readFileSync(INDEX_FILE, 'utf-8'));
     } catch {
       // If the index does not exist, lazily create it to keep the two-layer retrieval usable
-      idx = { meta: { lastUpdated: new Date().toISOString(), description: 'Lingxi document index - first-layer retrieval' }, documents: [] };
+      idx = { meta: { lastUpdated: new Date().toISOString(), description: 'ZhiGui document index - first-layer retrieval' }, documents: [] };
     }
     if (idx && idx.documents) {
       idx.documents = idx.documents.filter(document => document.type !== 'decisions');

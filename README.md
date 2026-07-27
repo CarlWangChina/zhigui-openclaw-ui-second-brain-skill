@@ -8,34 +8,6 @@
 
 > An advanced, UI-powered AI second-brain Agent Skill for OpenClaw, Hermes Agent, WorkBuddy, TRAE, and QClaw.
 
-<!--
-README UI TASK — Kewei Huang
-
-Before public release, complete the first screen of this README:
-
-1. Add one polished ZhiGui hero image.
-2. Add one 10–20 second GIF showing the real interactive UI workflow.
-3. Add four real product screenshots:
-   - Decision Comparison
-   - Tomorrow's Plan
-   - Conflict Review
-   - Guided Note Import
-4. Place the hero image, GIF, and screenshots here, before the long feature descriptions.
-5. Use the real product interface rather than design mockups.
-6. Save all files under assets/ and uncomment the Markdown below.
-
-![ZhiGui Hero](assets/zhigui-hero.png)
-![ZhiGui Interactive Demo](assets/zhigui-demo.gif)
-
-| Decision Comparison | Tomorrow's Plan |
-|---|---|
-| ![](assets/decision-comparison.png) | ![](assets/tomorrow-plan.png) |
-
-| Conflict Review | Guided Note Import |
-|---|---|
-| ![](assets/conflict-review.png) | ![](assets/guided-import.png) |
--->
-
 ## Product Overview
 
 Most note-taking tools solve the problem of **how to record more**. ZhiGui solves the problem of **how to use what you have already accumulated**.
@@ -172,47 +144,9 @@ WorkBuddy and TRAE have completed functional and interactive UI testing.
 
 OpenClaw, Hermes Agent, and QClaw compatibility testing is currently in progress. Their status will be changed to `Tested` only after the complete Skill workflow and interactive UI have been verified.
 
-<!--
-PLATFORM TEST TASK — Kewei Huang
-
-For every platform, verify:
-
-1. Skill installation
-2. UI launch
-3. Note import
-4. Conflict review
-5. Decision comparison
-6. Tomorrow planning
-7. Plan delivery through the platform's existing agent channels
-
-Do not mark OpenClaw, Hermes Agent, or QClaw as Tested before completing real tests.
-Update the English and Chinese compatibility tables together after each platform passes.
--->
-
 ## Installation
 
 Platform-specific installation instructions will be added as compatibility verification is completed.
-
-<!--
-INSTALLATION DOCUMENTATION TASK — Kewei Huang
-
-Replace the placeholder above with exact, copy-paste-ready instructions for:
-
-### OpenClaw
-### Hermes Agent
-### WorkBuddy
-### TRAE
-### QClaw
-
-Each subsection must include:
-
-1. Installation command or marketplace path
-2. Required permissions and dependencies
-3. How to open the interactive UI
-4. How to import the first note
-5. How to verify that installation succeeded
-6. One real screenshot of the completed installation
--->
 
 ## User Guide
 
@@ -229,20 +163,6 @@ Every major action must include a real screenshot:
 - generating tomorrow's plan;
 - modifying and confirming the final plan;
 - receiving the plan through existing agent channels.
-
-<!--
-USER GUIDE TASK — Kewei Huang
-
-Create:
-
-- docs/ZhiGui-User-Guide-EN.pdf
-- docs/ZhiGui-User-Guide-ZH.pdf
-
-Use real screenshots for every key step. After completing the files, replace this comment with:
-
-- [English User Guide](docs/ZhiGui-User-Guide-EN.pdf)
-- [中文使用手册](docs/ZhiGui-User-Guide-ZH.pdf)
--->
 
 ## Authors
 
@@ -461,15 +381,4 @@ OpenClaw、Hermes Agent 和 QClaw 正在进行兼容性测试。只有完整 Ski
 Copyright © 2026 Samoye AI. All rights reserved.  
 商业授权：[samoyeai.com](https://samoyeai.com)
 
-<!--
-发布前最终检查任务 — 黄可伟
 
-1. README 第一屏加入真实产品主视觉、10～20 秒 UI GIF 和四张核心功能截图。
-2. 补充五个平台准确、可复制的安装方法以及安装完成截图。
-3. WorkBuddy 和 TRAE 保持“已完成测试”。
-4. OpenClaw、Hermes Agent 和 QClaw 完成真实测试后再修改状态。
-5. 完成中英文两份逐页截图 PDF 手册并加入下载链接。
-6. 检查所有图片、锚点、文件路径和下载链接。
-7. 确保英文与中文功能描述、平台状态和安装说明保持一致。
-8. 确认明日计划可以通过各宿主平台现有的智能体消息渠道发送。
--->

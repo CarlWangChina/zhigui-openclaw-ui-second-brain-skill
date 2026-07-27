@@ -1,5 +1,5 @@
 /**
- * Core scenario tests for the Lingxi project.
+ * Core scenario tests for the ZhiGui project.
  * Covers key scenarios from engine/test-cases.md.
  * Uses Node.js built-in assert module with a temporary data directory.
  */
@@ -16,7 +16,7 @@ const Scheduler = require('../engine/scheduler');
 const DateUtils = require('../engine/date-utils');
 const Utils = require('../engine/utils');
 
-const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lingxi-core-'));
+const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zhigui-core-'));
 ensureDataInitialized(testDir);
 Storage.setDataDir(testDir);
 Actions.configure(testDir);

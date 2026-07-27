@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 /**
- * Lingxi - Self-contained deployment script (called by start.bat / start.sh)
+ * ZhiGui - Self-contained deployment script (called by start.bat / start.sh)
  *
  * Responsibilities:
  *   1. Install the skill engine (engine/), scripts (scripts/), docs (SKILL.md) into
  *      the target skill directory — the skill package "brings its own engine", import-and-go.
  *   2. Write config.json:
  *        - Dev mode (deploy from project, APP_DIR ≠ SKILL_DIR): dataDir points to
- *          <APP_DIR>/.lingxi (shared with the Electron dashboard, single source of truth).
- *        - Standalone mode (run directly against the skill directory): dataDir uses relative path ".lingxi",
+ *          <APP_DIR>/.zhigui (shared with the Electron dashboard, single source of truth).
+ *        - Standalone mode (run directly against the skill directory): dataDir uses relative path ".zhigui",
  *          data lives inside the skill folder, fully self-contained and portable across machines.
  *   3. Initialize the data directory (events.json / split documents / state.json / documents.json / history.json).
- *   4. Call register-mcp to register lingxi into the global MCP config, so the agent can call it after wiring.
+ *   4. Call register-mcp to register zhigui into the global MCP config, so the agent can call it after wiring.
  *
  * Args:
  *   argv[2] = APP_DIR   (project root dir, can equal SKILL_DIR for standalone mode)
@@ -28,23 +28,23 @@ const SKILL_DIR = process.argv[3];
 const NODE_EXE = process.argv[4] || process.execPath;
 
 if (!SKILL_DIR) {
-  console.error('[Lingxi] Missing SKILL_DIR argument');
+  console.error('[ZhiGui] Missing SKILL_DIR argument');
   process.exit(1);
 }
 
 // Standalone mode: APP_DIR not provided or equals SKILL_DIR -> data is self-contained inside the skill
 const standalone = !APP_DIR || APP_DIR === SKILL_DIR;
 const DATA_DIR = standalone
-  ? path.join(SKILL_DIR, '.lingxi')
-  : path.join(APP_DIR, '.lingxi');
+  ? path.join(SKILL_DIR, '.zhigui')
+  : path.join(APP_DIR, '.zhigui');
 
-console.log('[Lingxi] Setup starting...');
+console.log('[ZhiGui] Setup starting...');
 console.log('  mode    : ' + (standalone ? 'standalone (self-contained)' : 'dev (project)'));
 console.log('  SKILL_DIR: ' + SKILL_DIR);
 console.log('  DATA_DIR : ' + DATA_DIR);
 
 // ===== 1. Install engine / scripts / docs into the skill directory =====
-console.log('\n[Lingxi] Installing engine + scripts into skill dir...');
+console.log('\n[ZhiGui] Installing engine + scripts into skill dir...');
 try {
   if (!fs.existsSync(SKILL_DIR)) fs.mkdirSync(SKILL_DIR, { recursive: true });
 
@@ -77,10 +77,10 @@ try {
 }
 
 // ===== 2. Write config.json =====
-console.log('\n[Lingxi] Writing config.json...');
+console.log('\n[ZhiGui] Writing config.json...');
 try {
   const config = standalone
-    ? { dataDir: '.lingxi', appDir: '.', installedAt: new Date().toISOString() }
+    ? { dataDir: '.zhigui', appDir: '.', installedAt: new Date().toISOString() }
     : {
         dataDir: DATA_DIR.replace(/\\/g, '/'),
         appDir: APP_DIR.replace(/\\/g, '/'),
@@ -93,7 +93,7 @@ try {
 }
 
 // ===== 3. Initialize the data directory =====
-console.log('\n[Lingxi] Checking data files...');
+console.log('\n[ZhiGui] Checking data files...');
 try {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -156,7 +156,7 @@ try {
       size: fs.statSync(path.join(DATA_DIR, `${type}.json`)).size,
     }));
     fs.writeFileSync(indexFile, JSON.stringify({
-      meta: { version: '2.1.0', lastUpdated: new Date().toISOString(), description: 'Lingxi document index - first-layer retrieval' },
+      meta: { version: '2.1.0', lastUpdated: new Date().toISOString(), description: 'ZhiGui document index - first-layer retrieval' },
       documents: docs,
     }, null, 2), 'utf8');
   } else console.log('  documents.json index exists.');
@@ -174,7 +174,7 @@ try {
 }
 
 // ===== 4. Register the global MCP (agent can call it after wiring) =====
-console.log('\n[Lingxi] Registering global MCP server...');
+console.log('\n[ZhiGui] Registering global MCP server...');
 try {
   registerMcp(SKILL_DIR, NODE_EXE);
 } catch (err) {
@@ -183,7 +183,7 @@ try {
 
 // ===== 5. Dev mode: point the project-level .mcp.json to the new engine location as well =====
 if (!standalone && APP_DIR) {
-  console.log('\n[Lingxi] Patching project MCP configs...');
+  console.log('\n[ZhiGui] Patching project MCP configs...');
   const MCP_SERVER = path.join(APP_DIR, 'skill', 'engine', 'server.js').replace(/\\/g, '/');
   const PROJECT_CONFIGS = [
     path.join(APP_DIR, '.mcp.json'),
@@ -194,7 +194,7 @@ if (!standalone && APP_DIR) {
     if (!fs.existsSync(cfgPath)) continue;
     try {
       const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-      const srv = cfg.mcpServers && cfg.mcpServers.lingxi;
+      const srv = cfg.mcpServers && cfg.mcpServers.zhigui;
       if (!srv) continue;
       if (!Array.isArray(srv.args)) srv.args = [];
       srv.args[0] = MCP_SERVER;
@@ -208,7 +208,7 @@ if (!standalone && APP_DIR) {
   }
 }
 
-console.log('\n[Lingxi] Setup complete!');
+console.log('\n[ZhiGui] Setup complete!');
 console.log('  - Skill engine installed at: ' + SKILL_DIR);
 console.log('  - Data at: ' + DATA_DIR);
-console.log('  - Next: register the lingxi MCP server in your AI tool (see SKILL.md "Installation & Setup").');
+console.log('  - Next: register the zhigui MCP server in your AI tool (see SKILL.md "Installation & Setup").');

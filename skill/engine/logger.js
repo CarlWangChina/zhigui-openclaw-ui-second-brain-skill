@@ -22,7 +22,7 @@ let _currentStream = null;
 
 /**
  * 初始化日志目录
- * @param {string} dataDir - .lingxi 数据目录路径
+ * @param {string} dataDir - .zhigui 数据目录路径
  */
 function init(dataDir) {
   if (!dataDir) return;

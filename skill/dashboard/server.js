@@ -1,5 +1,5 @@
 /**
- * Lingxi · Decision & Planning Companion - Local Server
+ * ZhiGui · Decision & Planning Companion - Local Server
  * Zero dependencies, uses only Node.js built-in modules
  * Features: Static file serving + JSON API + SSE real-time push
  */
@@ -16,28 +16,28 @@ const logger = require('../engine/logger');
 const Utils = require('../engine/utils');
 const { genId, todayStr, normalizeTime, normalizeDate } = Utils;
 
-const PORT = Number(process.env.LINGXI_PORT || 7788);
+const PORT = Number(process.env.ZHIGUI_PORT || 7788);
 // Data directory is resolved by the shared config loader (shared with MCP engine / Electron),
-// ensuring all three ends read/write the same .lingxi data; static assets are in ./public/.
+// ensuring all three ends read/write the same .zhigui data; static assets are in ./public/.
 const { loadConfig } = require('../lib/config');
 const CONFIG = loadConfig();
 const { ensureDataInitialized } = require('../lib/init-data');
 ensureDataInitialized(CONFIG.dataDir);
-const LINGXI_DIR = CONFIG.dataDir;
+const ZHIGUI_DIR = CONFIG.dataDir;
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const STATE_FILE = path.join(LINGXI_DIR, 'state.json');
-const HISTORY_FILE = path.join(LINGXI_DIR, 'history.json');
-const INDEX_FILE = path.join(LINGXI_DIR, 'documents.json');
+const STATE_FILE = path.join(ZHIGUI_DIR, 'state.json');
+const HISTORY_FILE = path.join(ZHIGUI_DIR, 'history.json');
+const INDEX_FILE = path.join(ZHIGUI_DIR, 'documents.json');
 
 const { BrainIndex } = require('../engine/brain-index');
 const Storage = require('../engine/storage');
-Storage.setDataDir(LINGXI_DIR);
+Storage.setDataDir(ZHIGUI_DIR);
 const Actions = require('../engine/actions');
-Actions.configure(LINGXI_DIR);
+Actions.configure(ZHIGUI_DIR);
 // Second Brain association index layer (for dashboard topic/cascade delete/association search)
 let brainIndex = null;
 function getBrainIndex() {
-  if (!brainIndex) brainIndex = new BrainIndex(LINGXI_DIR);
+  if (!brainIndex) brainIndex = new BrainIndex(ZHIGUI_DIR);
   return brainIndex;
 }
 
@@ -46,12 +46,12 @@ function recordManualToEvents(kind, summary, detail, meta) {}
 
 // ─── Document Split — Two-layer Retrieval Architecture (HTTP server also supported) ────────────────────────────
 const DOCUMENT_FILES = {
-  goals: path.join(LINGXI_DIR, 'goals.json'),
-  schedule: path.join(LINGXI_DIR, 'schedule.json'),
-  errands: path.join(LINGXI_DIR, 'errands.json'),
-  notes: path.join(LINGXI_DIR, 'notes.json'),
-  reminders: path.join(LINGXI_DIR, 'reminders.json'),
-  userProfile: path.join(LINGXI_DIR, 'userProfile.json'),
+  goals: path.join(ZHIGUI_DIR, 'goals.json'),
+  schedule: path.join(ZHIGUI_DIR, 'schedule.json'),
+  errands: path.join(ZHIGUI_DIR, 'errands.json'),
+  notes: path.join(ZHIGUI_DIR, 'notes.json'),
+  reminders: path.join(ZHIGUI_DIR, 'reminders.json'),
+  userProfile: path.join(ZHIGUI_DIR, 'userProfile.json'),
 };
 
 const DOCUMENT_KEYS = {
@@ -116,7 +116,7 @@ function ensureIndex() {
     meta: {
       version: '2.1.0',
       lastUpdated: new Date().toISOString(),
-      description: 'Lingxi Document Index — First Layer of Retrieval'
+      description: 'ZhiGui Document Index — First Layer of Retrieval'
     },
     documents: [
       { type: 'goals', title: 'Goals and Constraints', description: 'Strategic goals, current goals, constraints', lastUpdated: new Date().toISOString(), size: 0 },
@@ -721,7 +721,7 @@ const server = http.createServer(async (req, res) => {
 let watchDebounce = null;
 function setupFileWatcher() {
   try {
-    fs.watch(LINGXI_DIR, { persistent: false }, (event, filename) => {
+    fs.watch(ZHIGUI_DIR, { persistent: false }, (event, filename) => {
       if (!filename) return;
       // Detect lock file changes — push lock state to dashboard
       if (filename === '.write-lock') {
@@ -748,12 +748,12 @@ function setupFileWatcher() {
 server.listen(PORT, () => {
   console.log('');
   console.log('  ╔══════════════════════════════════════╗');
-  console.log('  ║     Lingxi · AI Schedule Dashboard    ║');
+  console.log('  ║     ZhiGui · AI Schedule Dashboard    ║');
   console.log('  ╚══════════════════════════════════════╝');
   console.log('');
   console.log(`  Dashboard:  http://localhost:${PORT}`);
   console.log(`  Health:     http://localhost:${PORT}/api/health`);
-  console.log(`  Data Dir:   ${LINGXI_DIR}`);
+  console.log(`  Data Dir:   ${ZHIGUI_DIR}`);
   console.log('');
   console.log('  Press Ctrl+C to stop the server');
   console.log('');

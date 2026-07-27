@@ -14,7 +14,7 @@ const notesOutput = path.resolve(skillDir, '..', 'reports', 'notes-preview.png')
 const knowledgeOutput = path.resolve(skillDir, '..', 'reports', 'knowledge-preview.png');
 let server = null;
 const consoleErrors = [];
-const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lingxi-dashboard-ui-'));
+const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zhigui-dashboard-ui-'));
 
 function seedDashboardData() {
   ensureDataInitialized(testDataDir);
@@ -58,7 +58,7 @@ app.whenReady().then(async () => {
     seedDashboardData();
     server = spawn(process.execPath, ['dashboard/server.js'], {
       cwd: skillDir,
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', LINGXI_PORT: String(port), LINGXI_DATA_DIR: testDataDir },
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', ZHIGUI_PORT: String(port), ZHIGUI_DATA_DIR: testDataDir },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     await waitForServer(server);
@@ -211,7 +211,7 @@ app.whenReady().then(async () => {
     }
 
     // Capture the exact note presentation under review: compact AI title, body on demand.
-    await win.webContents.executeJavaScript(`localStorage.setItem('lingxi_view', 'all')`);
+    await win.webContents.executeJavaScript(`localStorage.setItem('zhigui_view', 'all')`);
     await win.reload();
     await new Promise(resolve => setTimeout(resolve, 1000));
     await win.webContents.executeJavaScript(`(async () => {
@@ -231,7 +231,7 @@ app.whenReady().then(async () => {
 
     // Capture the knowledge tree as well: its note title and metadata must occupy
     // separate rows so metadata chips never squeeze the title into vertical text.
-    await win.webContents.executeJavaScript(`localStorage.setItem('lingxi_view', 'knowledge')`);
+    await win.webContents.executeJavaScript(`localStorage.setItem('zhigui_view', 'knowledge')`);
     await win.reload();
     await new Promise(resolve => setTimeout(resolve, 1000));
     await win.webContents.executeJavaScript(`(async () => {
@@ -249,7 +249,7 @@ app.whenReady().then(async () => {
 
     // A hidden BrowserWindow can keep the last painted frame after DOM-only view switches.
     // Reload with the persisted "today" view before capturing the visual artifact.
-    await win.webContents.executeJavaScript(`localStorage.setItem('lingxi_view', 'today')`);
+    await win.webContents.executeJavaScript(`localStorage.setItem('zhigui_view', 'today')`);
     await win.reload();
     await new Promise(resolve => setTimeout(resolve, 1200));
     const finalFrame = await win.webContents.executeJavaScript(`(() => {

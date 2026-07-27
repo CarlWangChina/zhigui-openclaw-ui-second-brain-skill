@@ -990,7 +990,7 @@ function generateBriefings(opts) {
 
     state.briefings[bdDateStr] = {
       date: bdDateStr,
-      // Structured data — AI will compose natural language via lingxi_set_briefing
+      // Structured data — AI will compose natural language via zhigui_set_briefing
       _raw: true,  // flag: briefing not yet composed by AI
       mustReminders: dayReminders.map(rm => ({ id: rm.id, title: rm.title, time: (rm.triggerAt || '').slice(11, 16), priority: rm.priority })),
       mustErrands: mustErrands.map(e => ({ id: e.id, title: e.title, priority: e.priority })),

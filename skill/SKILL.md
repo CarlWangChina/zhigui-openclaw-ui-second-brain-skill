@@ -1,5 +1,5 @@
 ---
-name: lingxi
+name: zhigui
 description: A decision and planning companion that remembers durable context, compares options, proposes adaptable plans, and records commitments only when they are useful. Use for personal decisions, goal planning, scheduling, reviews, reminders, and long-term context.
 ---
 
@@ -23,27 +23,27 @@ description: A decision and planning companion that remembers durable context, c
 
 At the beginning of a planning or review conversation:
 
-- Call `lingxi_get_overview` to see what exists. It also runs the lightweight daily check: refreshes DDL-derived state for unlocked goals and returns current conflicts, without replacing AI scores or user locks. Treat note titles as the knowledge manifest; do not load note bodies up front.
-- If the overview contains notes with `needsEnrichment=true`, load each pending note individually with `lingxi_get_note_detail`, then call `lingxi_enrich_note` with an AI-written title, topic and category. This creates a proposal in `settings-conflicts.json`; it is not applied until the user confirms it in the dashboard.
-- When imported notes expose a material ambiguity or contradictory preference, call `lingxi_raise_setting_conflict`. Never resolve a settings conflict or organization proposal silently.
-- Select related topic IDs yourself from the overview, then call `lingxi_recall({ topicIds })` or `lingxi_get_context({ topicIds })`. The engine must not select relevance through keyword matching, lexical overlap, or body scanning.
+- Call `zhigui_get_overview` to see what exists. It also runs the lightweight daily check: refreshes DDL-derived state for unlocked goals and returns current conflicts, without replacing AI scores or user locks. Treat note titles as the knowledge manifest; do not load note bodies up front.
+- If the overview contains notes with `needsEnrichment=true`, load each pending note individually with `zhigui_get_note_detail`, then call `zhigui_enrich_note` with an AI-written title, topic and category. This creates a proposal in `settings-conflicts.json`; it is not applied until the user confirms it in the dashboard.
+- When imported notes expose a material ambiguity or contradictory preference, call `zhigui_raise_setting_conflict`. Never resolve a settings conflict or organization proposal silently.
+- Select related topic IDs yourself from the overview, then call `zhigui_recall({ topicIds })` or `zhigui_get_context({ topicIds })`. The engine must not select relevance through keyword matching, lexical overlap, or body scanning.
 
 After a user message:
 
 - Store directly in the appropriate entity: durable context as a note, a real objective as a goal, a one-off commitment as an action, and a meaningful planning conclusion as history.
 - Never create extra activities to make a day look complete. A simple statement such as “今晚我要开会” may create one action with no start time; it must not invent a time, duration, walk, review, or other surrounding activity.
-- When saving a note, call `lingxi_add_note` with a concise summary title that is meaningfully shorter than the body, plus an AI-decided topic and category. Never derive these with keyword rules or simple truncation.
+- When saving a note, call `zhigui_add_note` with a concise summary title that is meaningfully shorter than the body, plus an AI-decided topic and category. Never derive these with keyword rules or simple truncation.
 - Ask before assigning or moving a real calendar time when the user has not supplied it. Missing details may remain as an unscheduled action.
-- For a concrete time-bound obligation, use `lingxi_add_reminder` after the time is known or reasonably confirmed.
+- For a concrete time-bound obligation, use `zhigui_add_reminder` after the time is known or reasonably confirmed.
 
 When planning:
 
-- Use `lingxi_create_plan` to produce a draft structure.
+- Use `zhigui_create_plan` to produce a draft structure.
 - Compare at least two plausible approaches when the decision has meaningful trade-offs.
-- Use `lingxi_score_goals` for contextual AI judgment. Treat numeric rule-based scoring as supporting evidence, never as the final decision by itself.
-- Use `lingxi_auto_schedule` only when the user asks for a plan or explicitly accepts a proposed schedule. Never run it merely because one action, note, or meeting was mentioned. Preserve user-set times and explain conflicts.
+- Use `zhigui_score_goals` for contextual AI judgment. Treat numeric rule-based scoring as supporting evidence, never as the final decision by itself.
+- Use `zhigui_auto_schedule` only when the user asks for a plan or explicitly accepts a proposed schedule. Never run it merely because one action, note, or meeting was mentioned. Preserve user-set times and explain conflicts.
 
-At the end of a meaningful planning session, call `lingxi_add_history` with a concise summary of the decision, assumptions and next review point. Routine chat does not need a history entry.
+At the end of a meaningful planning session, call `zhigui_add_history` with a concise summary of the decision, assumptions and next review point. Routine chat does not need a history entry.
 
 ## Memory model
 
@@ -63,9 +63,9 @@ Treat every note as two layers:
 - **Index:** `id`, AI-written `title`, topic, category, dates and status. This is safe to scan in full and tells you what exists.
 - **Detail:** the original `content` and other rich fields. Load this only when the note title is relevant to the current request.
 
-Do not put body excerpts or first-line truncations into the index. Do not read all note details at conversation start. Use `lingxi_get_note_detail(noteId)` for one note, or `lingxi_get_topic_document(topicId)` only after selecting a relevant topic.
+Do not put body excerpts or first-line truncations into the index. Do not read all note details at conversation start. Use `zhigui_get_note_detail(noteId)` for one note, or `zhigui_get_topic_document(topicId)` only after selecting a relevant topic.
 
-Dashboard input and imported files are an inbox, not an automatic classifier. A note remains `needsEnrichment=true` until the AI reads that single body and proposes its title, topic and category with `lingxi_enrich_note`; the user confirms or rejects that proposal from the action-queue settings panel.
+Dashboard input and imported files are an inbox, not an automatic classifier. A note remains `needsEnrichment=true` until the AI reads that single body and proposes its title, topic and category with `zhigui_enrich_note`; the user confirms or rejects that proposal from the action-queue settings panel.
 
 ## Follow-up policy
 
@@ -82,22 +82,22 @@ Otherwise make a modest, reversible assumption and label it. Example:
 
 ## Data and tools
 
-ZhiGui stores its local data under the configured `.lingxi` directory. Browser dashboard, Electron desktop app and MCP engine share the same action and persistence layers.
+ZhiGui stores its local data under the configured `.zhigui` directory. Browser dashboard, Electron desktop app and MCP engine share the same action and persistence layers.
 
 Use lightweight retrieval for overview work:
 
-- `lingxi_get_overview`
-- `lingxi_get_documents_index`
-- `lingxi_get_state` with selected sections
-- `lingxi_get_today`
+- `zhigui_get_overview`
+- `zhigui_get_documents_index`
+- `zhigui_get_state` with selected sections
+- `zhigui_get_today`
 
 Load details only when needed:
 
-- `lingxi_get_goal_detail(goalId)`
-- `lingxi_get_note_detail(noteId)`
-- `lingxi_get_topic_document(topicId)`
-- `lingxi_get_day_schedule(date)`
-- `lingxi_get_days_in_range(startDate, endDate)`
+- `zhigui_get_goal_detail(goalId)`
+- `zhigui_get_note_detail(noteId)`
+- `zhigui_get_topic_document(topicId)`
+- `zhigui_get_day_schedule(date)`
+- `zhigui_get_days_in_range(startDate, endDate)`
 
 There is no event stream. Goals, notes, actions, schedules, topics and meaningful conversation history are the canonical records. Deleting an entity deletes it from the user-facing system instead of leaving a duplicate audit entry behind.
 
@@ -112,7 +112,7 @@ Register the MCP server with Node.js:
 ```json
 {
   "mcpServers": {
-    "lingxi": {
+    "zhigui": {
       "command": "node",
       "args": ["<skill_directory>/engine/server.js"]
     }

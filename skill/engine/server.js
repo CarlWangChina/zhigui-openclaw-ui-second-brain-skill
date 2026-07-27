@@ -191,7 +191,7 @@ function recalcUrgency(daysLeft) {
   return 10;
 }
 
-// Cost-effectiveness estimate (kept only for lingxi_create_plan initial priority)
+// Cost-effectiveness estimate (kept only for zhigui_create_plan initial priority)
 function computeCostPerf(g, state) {
   const dl = g.deadline ? daysBetween(g.deadline) : null;
   if (dl == null) return 18; // no deadline → medium
@@ -401,7 +401,7 @@ async function buildPlan(state, args) {
 
   // 4) Write back + delegate to auto_schedule (recalc computes priorities + generates schedule/briefing here)
   writeState(state);
-  const scheduleResult = await handleToolCall('lingxi_auto_schedule', {
+  const scheduleResult = await handleToolCall('zhigui_auto_schedule', {
     startDate: todayStr(),
     days: daysTo + 1,
   });
@@ -756,7 +756,7 @@ function parseTimeToMin(timeStr) {
 const TOOLS = [
   // ── Data Reading ──
   {
-    name: 'lingxi_get_state',
+    name: 'zhigui_get_state',
     description: 'Read ZhiGui state: strategic goals, constraints, current goals, schedule, briefing, conflicts, errands, notes and value system. Optional `sections` limits the returned data.',
     inputSchema: {
       type: 'object',
@@ -771,8 +771,8 @@ const TOOLS = [
   },
   // ── Topic Reorganization ──
   {
-    name: 'lingxi_propose_topic_split',
-    description: 'Propose splitting a topic into smaller ones. Use when a topic has grown large and contains notes that diverge into distinct sub-themes. First read the topic document (lingxi_get_topic_document), then analyze whether notes naturally cluster into separate groups. The proposal enters the review queue — it is NOT executed until the user accepts it.',
+    name: 'zhigui_propose_topic_split',
+    description: 'Propose splitting a topic into smaller ones. Use when a topic has grown large and contains notes that diverge into distinct sub-themes. First read the topic document (zhigui_get_topic_document), then analyze whether notes naturally cluster into separate groups. The proposal enters the review queue — it is NOT executed until the user accepts it.',
     inputSchema: {
       type: 'object',
       required: ['sourceTopicId', 'noteMoves', 'newTopics'],
@@ -785,7 +785,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_propose_topic_merge',
+    name: 'zhigui_propose_topic_merge',
     description: 'Propose merging one or more related topics into a single topic. Use when several topics clearly belong to the same project or theme (e.g. five sub-topics all under a neural-network project) and keeping them separate adds noise. First read the topic documents, then assess semantic overlap. The proposal enters the review queue — it is NOT executed until the user accepts it.',
     inputSchema: {
       type: 'object',
@@ -799,7 +799,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_propose_topic_rename',
+    name: 'zhigui_propose_topic_rename',
     description: 'Propose renaming a topic. Use when a topic\'s content has evolved and the original label no longer accurately describes it, or when the label can be made clearer. The proposal enters the review queue — it is NOT executed until the user accepts it.',
     inputSchema: {
       type: 'object',
@@ -812,7 +812,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_propose_topic_precipitation',
+    name: 'zhigui_propose_topic_precipitation',
     description: 'Propose extracting a topic\'s notes from notes.json into a standalone topics/<id>.json file. Use when a topic has grown large enough that splitting it would speed up retrieval and reduce tokens. The proposal enters the review queue — it is NOT executed until the user accepts it. There is no automatic threshold; the AI decides based on the topic\'s size and coherence.',
     inputSchema: {
       type: 'object',
@@ -824,12 +824,12 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_get_today',
-    description: 'Get today schedule, briefing, urgent items, active topics, and the note title index. Note bodies are deliberately excluded. Read a single body only when relevant with lingxi_get_note_detail(noteId), or load a selected topic with lingxi_get_topic_document(topicId).',
+    name: 'zhigui_get_today',
+    description: 'Get today schedule, briefing, urgent items, active topics, and the note title index. Note bodies are deliberately excluded. Read a single body only when relevant with zhigui_get_note_detail(noteId), or load a selected topic with zhigui_get_topic_document(topicId).',
     inputSchema: { type: 'object', properties: {} },
   },
   {
-    name: 'lingxi_get_history',
+    name: 'zhigui_get_history',
     description: 'Read conversation history memory. ZhiGui history is cumulative; the AI should read history before generating a schedule to understand user context.',
     inputSchema: {
       type: 'object',
@@ -841,7 +841,7 @@ const TOOLS = [
 
   // ── Goal Management ──
   {
-    name: 'lingxi_add_goal',
+    name: 'zhigui_add_goal',
     description: 'Add a strategic goal / current goal / constraint. This tool checks whether information is sufficient — if not, it returns needsClarification=true and a list of follow-up questions; you must ask the user, never assume. Returns success=true only when information is sufficient. Set force=true to skip the check (use only when the user has explicitly provided enough info).',
     inputSchema: {
       type: 'object',
@@ -879,7 +879,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_update_goal',
+    name: 'zhigui_update_goal',
     description: 'Update goal/constraint attributes: title, description, priority, deadline, lock state, completion state, etc.',
     inputSchema: {
       type: 'object',
@@ -899,7 +899,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_delete_goal',
+    name: 'zhigui_delete_goal',
     description: 'Delete a goal or constraint. This AUTO-cascades and removes every schedule task derived from this goal. IMPORTANT: first call with confirm:false (or omit) to get a cascade preview — the goal plus every associated task with its date — show that checklist to the user for confirmation, THEN call again with confirm:true to actually delete.',
     inputSchema: {
       type: 'object',
@@ -914,8 +914,8 @@ const TOOLS = [
 
   // ── Schedule Tasks ──
   {
-    name: 'lingxi_add_task',
-    description: 'Add one confirmed calendar commitment. Use only when the user explicitly supplied or accepted the exact date and start time. Never invent a time, duration, adjacent task, or routine. If time is unknown, use lingxi_add_errand without time so it stays in the unscheduled queue.',
+    name: 'zhigui_add_task',
+    description: 'Add one confirmed calendar commitment. Use only when the user explicitly supplied or accepted the exact date and start time. Never invent a time, duration, adjacent task, or routine. If time is unknown, use zhigui_add_errand without time so it stays in the unscheduled queue.',
     inputSchema: {
       type: 'object',
       required: ['date', 'time', 'title'],
@@ -932,7 +932,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_update_task',
+    name: 'zhigui_update_task',
     description: 'Update a task in the schedule (e.g. mark as completed, change time).',
     inputSchema: {
       type: 'object',
@@ -952,7 +952,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_delete_task',
+    name: 'zhigui_delete_task',
     description: 'Delete a task from the schedule.',
     inputSchema: {
       type: 'object',
@@ -966,12 +966,12 @@ const TOOLS = [
 
   // ── Logic Computation ──
   {
-    name: 'lingxi_recalc_priorities',
+    name: 'zhigui_recalc_priorities',
     description: 'Refresh deadline-derived fields (daysLeft/overdue) and backfill missing priorities with a neutral default. The engine no longer applies rule-based priority formulas; AI contextual judgment owns the scores.',
     inputSchema: { type: 'object', properties: {} },
   },
   {
-    name: 'lingxi_score_goals',
+    name: 'zhigui_score_goals',
     description: 'AI-driven priority scoring. The AI evaluates each active goal with contextual reasoning (not just deadline lookup) and assigns a priority score (0-100). Use this when: (1) rule-based recalc feels too mechanical, (2) soft factors like difficulty/momentum/dependency/emotional state matter, (3) the user\'s value system should influence ranking. The AI should call this after major changes (new goal added, goal completed, value system updated) or when the user asks "what should I focus on?".',
     inputSchema: {
       type: 'object',
@@ -1004,14 +1004,14 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_detect_conflicts',
+    name: 'zhigui_detect_conflicts',
     description: 'Run conflict detection: overdue goals, upcoming deadlines, time conflicts, constraint violations, strategic drift. Returns the detected conflict list.',
     inputSchema: { type: 'object', properties: {} },
   },
 
   // ── Briefing & History ──
   {
-    name: 'lingxi_set_briefing',
+    name: 'zhigui_set_briefing',
     description: "Compose today's morning briefing in natural language. After auto_schedule generates the schedule, the briefing contains structured raw data (_raw:true). Use this tool to write the briefing based on that data. YOU decide what to recommend — not formulas. Consider the user's value system, today's constraints, note signals, and goal deadlines. Write in the panel language (check meta.lang). Structure: use the suggested sections below as a gentle guide, not a rigid form. Omit or merge sections when it makes the briefing more natural. Each section should be 1-3 concise sentences.",
     inputSchema: {
       type: 'object',
@@ -1038,8 +1038,8 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_add_history',
-    description: 'Append a concise record for a meaningful planning conversation. This tool does not extract or classify notes. When a durable note is useful, the AI separately calls lingxi_add_note with its own title, topic and category.',
+    name: 'zhigui_add_history',
+    description: 'Append a concise record for a meaningful planning conversation. This tool does not extract or classify notes. When a durable note is useful, the AI separately calls zhigui_add_note with its own title, topic and category.',
     inputSchema: {
       type: 'object',
       required: ['userMessage', 'aiResponse'],
@@ -1057,7 +1057,7 @@ const TOOLS = [
 
   // ── Panel Control ──
   {
-    name: 'lingxi_set_panel',
+    name: 'zhigui_set_panel',
     description: 'Control the dashboard panel expand/collapse state. Prerequisite: the ZhiGui desktop app (Electron) must already be running via start.bat, otherwise the panel will not show. This tool only controls expand/collapse of an already-running app; it does not launch the app itself.',
     inputSchema: {
       type: 'object',
@@ -1068,7 +1068,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_set_theme',
+    name: 'zhigui_set_theme',
     description: 'Switch the dashboard theme. Prerequisite: the ZhiGui desktop app (Electron) must be running.',
     inputSchema: {
       type: 'object',
@@ -1079,7 +1079,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_launch_dashboard',
+    name: 'zhigui_launch_dashboard',
     description: 'Launch the ZhiGui visualization dashboard on the user desktop. Auto-starts the dashboard HTTP server (port 7788) as a detached background process if not already running, then opens the system browser to http://localhost:7788. Should be called at conversation start so the user can see the second brain state in real time. Returns the dashboard URL. Idempotent — safe to call repeatedly; if already running, just opens the browser.',
     inputSchema: {
       type: 'object',
@@ -1089,24 +1089,24 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_get_config',
+    name: 'zhigui_get_config',
     description: 'Get ZhiGui configuration info: data directory path, app directory path. For debugging.',
     inputSchema: { type: 'object', properties: {} },
   },
 
   // ── Intelligence Layer ──
   {
-    name: 'lingxi_get_instructions',
+    name: 'zhigui_get_instructions',
     description: '[Must call first] Get the full ZhiGui behavior guide. You are the ZhiGui scheduling assistant, not a database operator. Call this tool to get the complete rules for how to think, follow up, plan, and execute tasks. Includes: role positioning, follow-up rules, priority evaluation, conflict detection, constraint enforcement, schedule generation flow, user profile usage. Do not operate any data before reading this guide.',
     inputSchema: { type: 'object', properties: {} },
   },
   {
-    name: 'lingxi_get_user_profile',
+    name: 'zhigui_get_user_profile',
     description: 'Read the user profile when the current request needs preferences, values, communication style, or personal context. Do not load it automatically for unrelated operational actions.',
     inputSchema: { type: 'object', properties: {} },
   },
   {
-    name: 'lingxi_update_user_profile',
+    name: 'zhigui_update_user_profile',
     description: 'Update the user profile. Call this tool in real time when new user traits are discovered in conversation (preferences, tone, tool tendencies, communication style, etc.). Supports incremental updates — pass only the fields to modify; others remain unchanged. Should be called once at the end of each conversation to record new user traits found during this conversation.',
     inputSchema: {
       type: 'object',
@@ -1126,7 +1126,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_auto_schedule',
+    name: 'zhigui_auto_schedule',
     description: 'Generate a proposed schedule only after the user explicitly asks for planning or accepts a proposed plan. It may read relevant goals, constraints and selected context, then detects conflicts and preserves manual times. Do not call it after a simple note, errand, or meeting statement; do not use it to fill a day with inferred routines.',
     inputSchema: {
       type: 'object',
@@ -1137,7 +1137,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_check_impact',
+    name: 'zhigui_check_impact',
     description: 'Analyze the impact of a new goal/constraint on the existing plan. Call this tool when the user proposes a new requirement. Returns: conflicts with existing goals, contradictions with constraints, whether time budget is overloaded, specific impact on the schedule. Helps you find problems before adding data.',
     inputSchema: {
       type: 'object',
@@ -1164,8 +1164,8 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_create_plan',
-    description: '[General planning] One-click generation of a structured plan for any "deadline + decomposable" complex goal: exams/certifications/theses/projects/fitness challenges, etc. 1) Create a strategic goal 2) Create multiple current goals by phase (phases can be explicitly specified by the AI via `phases`, otherwise auto-split into early/mid/late by cycle length) 3) Create constraints (per user request or sensible defaults) 4) Call auto_schedule to generate the full schedule. Priorities are not hand-written — computed uniformly by recalcPriorities based on urgency + strategic fit + cost-effectiveness + values. lingxi_create_study_plan is a compatible alias.',
+    name: 'zhigui_create_plan',
+    description: '[General planning] One-click generation of a structured plan for any "deadline + decomposable" complex goal: exams/certifications/theses/projects/fitness challenges, etc. 1) Create a strategic goal 2) Create multiple current goals by phase (phases can be explicitly specified by the AI via `phases`, otherwise auto-split into early/mid/late by cycle length) 3) Create constraints (per user request or sensible defaults) 4) Call auto_schedule to generate the full schedule. Priorities are not hand-written — computed uniformly by recalcPriorities based on urgency + strategic fit + cost-effectiveness + values. zhigui_create_study_plan is a compatible alias.',
     inputSchema: {
       type: 'object',
       required: ['title', 'deadline'],
@@ -1199,7 +1199,7 @@ const TOOLS = [
 
   // ── Errand System ──
   {
-    name: 'lingxi_add_errand',
+    name: 'zhigui_add_errand',
     description: 'Add an operational action that does not need to become a knowledge record. Date and time are optional: use this for an unplanned action as well as a scheduled one. AI chooses the priority and retention with reasons; a one-off action defaults to transient and disappears when completed.',
     inputSchema: {
       type: 'object',
@@ -1220,7 +1220,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_get_errands',
+    name: 'zhigui_get_errands',
     description: 'Get a list of errands within a specified date range. Without parameters, returns all incomplete errands.',
     inputSchema: {
       type: 'object',
@@ -1232,7 +1232,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_complete_errand',
+    name: 'zhigui_complete_errand',
     description: 'Mark an errand as completed.',
     inputSchema: {
       type: 'object',
@@ -1243,7 +1243,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_delete_errand',
+    name: 'zhigui_delete_errand',
     description: 'Delete an errand.',
     inputSchema: {
       type: 'object',
@@ -1256,7 +1256,7 @@ const TOOLS = [
 
   // ── Life Notes System ──
   {
-    name: 'lingxi_add_note',
+    name: 'zhigui_add_note',
     description: 'Add one or more AI-organized notes. For a single note, pass title, content, topic, category. For batch import (e.g. user pastes multiple notes or a document), pass "notes" array — each item needs title, content, topic, category. When processing a batch: (1) read ALL notes before classifying, so you can detect contradictions and group related notes; (2) decide whether each note joins an existing topic or warrants a new one; (3) if you detect contradictions between notes (e.g. the user changed their mind), flag them in the "conflicts" field so the user sees them; (4) set "signal" when a note indicates health or emotional state changes. The AI writes the title and decides topic/category — the engine never derives these from keywords.',
     inputSchema: {
       type: 'object',
@@ -1275,8 +1275,8 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_enrich_note',
-    description: 'Propose an organization for one pending dashboard or imported note. First load its body with lingxi_get_note_detail(id), then provide an AI-written title, topic and category. The proposal is placed in settings-conflicts.json and is NOT applied to the knowledge index until the user confirms it in the dashboard.',
+    name: 'zhigui_enrich_note',
+    description: 'Propose an organization for one pending dashboard or imported note. First load its body with zhigui_get_note_detail(id), then provide an AI-written title, topic and category. The proposal is placed in settings-conflicts.json and is NOT applied to the knowledge index until the user confirms it in the dashboard.',
     inputSchema: {
       type: 'object',
       required: ['id', 'title', 'topic', 'category'],
@@ -1293,7 +1293,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_raise_setting_conflict',
+    name: 'zhigui_raise_setting_conflict',
     description: 'Place a consequential ambiguity or contradiction in the settings review queue. Use this when a decision cannot be safely inferred from imported notes or the user profile. Do not resolve it automatically.',
     inputSchema: {
       type: 'object',
@@ -1306,7 +1306,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_raise_note_conflict',
+    name: 'zhigui_raise_note_conflict',
     description: 'Report contradictions or inconsistencies between notes and place them in the user review queue. Use this when you detect factual contradictions, timeline conflicts, value contradictions, or goal conflicts across multiple notes. Always include the specific note IDs involved so the user can inspect the source.',
     inputSchema: {
       type: 'object',
@@ -1320,8 +1320,8 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_get_notes',
-    description: 'Read notes on demand. Without a filter, returns title-only index entries. With topicId or domain, returns the selected full notes. Prefer lingxi_get_note_detail for one note.',
+    name: 'zhigui_get_notes',
+    description: 'Read notes on demand. Without a filter, returns title-only index entries. With topicId or domain, returns the selected full notes. Prefer zhigui_get_note_detail for one note.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1332,7 +1332,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_delete_note',
+    name: 'zhigui_delete_note',
     description: 'Delete a life note.',
     inputSchema: {
       type: 'object',
@@ -1345,7 +1345,7 @@ const TOOLS = [
 
   // ── Event Stream System (v3.0 core) ──
   {
-    name: 'lingxi_create_event',
+    name: 'zhigui_create_event',
     description: '[RETIRED] Retired compatibility endpoint. Do not call it: save directly to a note, goal, action, reminder, or meaningful conversation history.',
     inputSchema: {
       type: 'object',
@@ -1401,7 +1401,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_resolve_event',
+    name: 'zhigui_resolve_event',
     description: '[RETIRED] Resolve an event — called after the user answers a follow-up. The AI provides the additional facts extracted from the user answers. The engine merges them into the event, marks it as resolved, and derives it into the file tree (schedule/notes/goals, etc.).',
     inputSchema: {
       type: 'object',
@@ -1435,7 +1435,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_get_pending_follows',
+    name: 'zhigui_get_pending_follows',
     description: '[RETIRED] Get the list of pending follow-up events. Call at the start of every new conversation; if there are pending follow-up events, proactively raise them with the user.',
     inputSchema: {
       type: 'object',
@@ -1445,7 +1445,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_get_summary',
+    name: 'zhigui_get_summary',
     description: '[RETIRED] Retired compatibility endpoint. Review selected current entity documents instead.',
     inputSchema: {
       type: 'object',
@@ -1456,13 +1456,13 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_check_reminders',
+    name: 'zhigui_check_reminders',
     description: 'Check scheduled time-point reminders (for example, "Fri 5pm submit report").',
     inputSchema: { type: 'object', properties: {} },
   },
   {
-    name: 'lingxi_add_reminder',
-    description: 'Add a scheduled time-point reminder. Unlike goal deadlines (which are checked during morning briefing), this is a precise time trigger — e.g. "remind me to submit the report at 5pm this Friday". The AI should create a reminder when the user mentions a specific time-bound obligation. Reminders are checked on every conversation (via lingxi_check_reminders) and surface in the morning briefing.',
+    name: 'zhigui_add_reminder',
+    description: 'Add a scheduled time-point reminder. Unlike goal deadlines (which are checked during morning briefing), this is a precise time trigger — e.g. "remind me to submit the report at 5pm this Friday". The AI should create a reminder when the user mentions a specific time-bound obligation. Reminders are checked on every conversation (via zhigui_check_reminders) and surface in the morning briefing.',
     inputSchema: {
       type: 'object',
       required: ['title', 'triggerAt'],
@@ -1479,7 +1479,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_get_reminders',
+    name: 'zhigui_get_reminders',
     description: 'Get all pending reminders, optionally filtered by date range.',
     inputSchema: {
       type: 'object',
@@ -1491,7 +1491,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_delete_reminder',
+    name: 'zhigui_delete_reminder',
     description: 'Delete a scheduled reminder by ID.',
     inputSchema: {
       type: 'object',
@@ -1504,7 +1504,7 @@ const TOOLS = [
 
   // ── Value System ──
   {
-    name: 'lingxi_update_value_system',
+    name: 'zhigui_update_value_system',
     description: 'Update the user value system. The value system records the user\'s weight preferences across life domains, used for decisions when multiple goals conflict. The AI should auto-update when: (1) the user makes an explicit choice/trade-off, OR (2) the user\'s casual words reveal a value preference (e.g. "I\'d rather have free time than overtime pay" → freedom weight up, money weight down). The AI should proactively infer values from everyday conversation — not wait for explicit statements.',
     inputSchema: {
       type: 'object',
@@ -1534,7 +1534,7 @@ const TOOLS = [
 
   // ── Document Index ──
   {
-    name: 'lingxi_get_overview',
+    name: 'zhigui_get_overview',
     description: 'LAYER-0 manifest — read this once at the start of a relevant conversation. Returns title-only indexes for goals, constraints, actions and every note, plus topic counts. Note bodies are excluded; retrieve one only when relevant.',
     inputSchema: {
       type: 'object',
@@ -1542,8 +1542,8 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_get_documents_index',
-    description: 'File-level index — shows what document FILES exist (goals / schedule / errands / notes / userProfile) with type, size, last-updated. This is a coarse file map. For a per-item brief of what actually exists, prefer lingxi_get_overview (LAYER-0 manifest). Use this only when you specifically need the file-level view.',
+    name: 'zhigui_get_documents_index',
+    description: 'File-level index — shows what document FILES exist (goals / schedule / errands / notes / userProfile) with type, size, last-updated. This is a coarse file map. For a per-item brief of what actually exists, prefer zhigui_get_overview (LAYER-0 manifest). Use this only when you specifically need the file-level view.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -1551,7 +1551,7 @@ const TOOLS = [
   },
   // ── Hierarchical detail loading (on-demand, saves tokens) ──
   {
-    name: 'lingxi_get_goal_detail',
+    name: 'zhigui_get_goal_detail',
     description: 'Load the FULL detail of a single goal on demand. The default state only contains a lightweight goal index (id, title, deadline, priority). Use this when you need the full goal content: description, detail, aiReasoning, aiFactors, components, relatedStrategicGoalId, etc. This reads only ONE goal file (goals/g_xxx.json) — minimal token cost.',
     inputSchema: {
       type: 'object',
@@ -1562,7 +1562,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_get_note_detail',
+    name: 'zhigui_get_note_detail',
     description: 'Load the FULL content of a single note on demand. The default state contains only AI-authored note titles and classifications. Reads only one note detail file.',
     inputSchema: {
       type: 'object',
@@ -1573,7 +1573,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_get_day_schedule',
+    name: 'zhigui_get_day_schedule',
     description: 'Load a specific day\'s schedule on demand (tasks, errands, day-notes). The default state only contains a schedule index (which days have records). Use this when: (1) the user mentions a specific date, (2) conflict detection needs that day\'s tasks, (3) the user asks "what\'s on Aug 1?". Auto-creates an empty day file if the date has no records yet. Reads only ONE day file (schedule/YYYY-MM-DD.json) — minimal token cost.',
     inputSchema: {
       type: 'object',
@@ -1584,7 +1584,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_get_days_in_range',
+    name: 'zhigui_get_days_in_range',
     description: 'Load multiple days\' schedules for a date range (e.g. weekly view). Only reads days that have records — does not create empty files for days with no schedule. Use for "what\'s this week look like?" or planning a multi-day trip.',
     inputSchema: {
       type: 'object',
@@ -1596,7 +1596,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_get_document_by_type',
+    name: 'zhigui_get_document_by_type',
     description: 'Layer-2 retrieval — read specific document content by document type. Must call get_documents_index first to see what documents exist, then call this tool as needed. type must be one of goals / schedule / errands / notes / userProfile.',
     inputSchema: {
       type: 'object',
@@ -1609,17 +1609,17 @@ const TOOLS = [
 
   // ── Second Brain · Association Index (topic foreign key + user-confirmed precipitation) ──
   {
-    name: 'lingxi_get_topics',
+    name: 'zhigui_get_topics',
     description: 'Read all topics and their association statistics. Topics are AI-authored aggregation units for notes, goals and action items (schedule tasks + errands). Each topic reports its linked entity counts and whether it has been precipitated into a standalone detail file.',
     inputSchema: { type: 'object', properties: {} },
   },
   {
-    name: 'lingxi_get_library',
+    name: 'zhigui_get_library',
     description: 'Read the AI-authored category and topic library. Use it to understand existing organization before deciding whether a new note belongs to an existing topic or needs a new one.',
     inputSchema: { type: 'object', properties: {} },
   },
   {
-    name: 'lingxi_update_library',
+    name: 'zhigui_update_library',
     description: 'Update categories or topics using AI judgment. Keywords, if supplied, are AI-authored retrieval aliases and are never used by the engine to classify notes automatically.',
     inputSchema: {
       type: 'object',
@@ -1650,8 +1650,8 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_get_topic_document',
-    description: 'On-demand read of a topic sedimented document (only that topic notes), for precise retrieval and token savings. topicId comes from lingxi_get_topics.',
+    name: 'zhigui_get_topic_document',
+    description: 'On-demand read of a topic sedimented document (only that topic notes), for precise retrieval and token savings. topicId comes from zhigui_get_topics.',
     inputSchema: {
       type: 'object',
       properties: { topicId: { type: 'string', description: 'Topic id' } },
@@ -1659,7 +1659,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_search_associated',
+    name: 'zhigui_search_associated',
     description: 'Associated search: input a topic keyword and return its goals, action items and notes.',
     inputSchema: {
       type: 'object',
@@ -1668,7 +1668,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_search',
+    name: 'zhigui_search',
     description: 'Global search across notes and goals; hits include topic affiliation. Used for fuzzy lookup when it is uncertain which topic something belongs to.',
     inputSchema: {
       type: 'object',
@@ -1677,7 +1677,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_recall',
+    name: 'zhigui_recall',
     description: '[Second brain · AI-selected recall] Return title-only items for topic IDs that the AI selected from the Layer-0 overview. The engine performs no keyword, lexical, or semantic relevance scoring.',
     inputSchema: {
       type: 'object',
@@ -1689,31 +1689,31 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_get_context',
-    description: '[Two-layer index · Layer-1] Get note titles and goal titles linked to selected topics. Full note bodies are excluded; call lingxi_get_note_detail only for a relevant title.',
+    name: 'zhigui_get_context',
+    description: '[Two-layer index · Layer-1] Get note titles and goal titles linked to selected topics. Full note bodies are excluded; call zhigui_get_note_detail only for a relevant title.',
     inputSchema: {
       type: 'object',
       required: ['topicIds'],
       properties: {
-        topicIds: { type: 'array', items: { type: 'string' }, description: 'Topic IDs (t_xxx) the AI judged relevant to the current conversation. Get available topics from lingxi_get_topics or lingxi_get_library.' },
+        topicIds: { type: 'array', items: { type: 'string' }, description: 'Topic IDs (t_xxx) the AI judged relevant to the current conversation. Get available topics from zhigui_get_topics or zhigui_get_library.' },
         limit: { type: 'number', description: 'Max number of context items to return. Default 5.' },
       },
     },
   },
   {
-    name: 'lingxi_delete_topic',
+    name: 'zhigui_delete_topic',
     description: 'Delete a topic and its associated goals, schedule tasks, errands and notes after an explicit cascade preview and confirmation.',
     inputSchema: {
       type: 'object',
       properties: {
-        topicId: { type: 'string', description: 'The topic id to delete (from lingxi_get_topics)' },
+        topicId: { type: 'string', description: 'The topic id to delete (from zhigui_get_topics)' },
         confirm: { type: 'boolean', description: 'Must explicitly pass true to execute the delete, preventing accidental deletion' },
       },
       required: ['topicId', 'confirm'],
     },
   },
   {
-    name: 'lingxi_delete_history',
+    name: 'zhigui_delete_history',
     description: 'Delete conversation history records. Can delete a single record by id, or clear all history when no id is provided. Used when the user wants to clear conversation logs.',
     inputSchema: {
       type: 'object',
@@ -1725,7 +1725,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_clear_briefings',
+    name: 'zhigui_clear_briefings',
     description: 'Clear all stored morning briefings. Briefings are regenerated on each auto_schedule call, so clearing them is safe.',
     inputSchema: {
       type: 'object',
@@ -1738,7 +1738,7 @@ const TOOLS = [
 
   // ── Data Export / Import ──
   {
-    name: 'lingxi_export_data',
+    name: 'zhigui_export_data',
     description: 'Export all ZhiGui data (goals, notes, schedule, errands, history, topic index, library) into a single portable JSON file for backup or migration. The export includes metadata with version, timestamp, and checksum.',
     inputSchema: {
       type: 'object',
@@ -1748,7 +1748,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'lingxi_import_data',
+    name: 'zhigui_import_data',
     description: 'Import data from a previously exported ZhiGui JSON file. Supports "replace" mode (overwrite all data) and "merge" mode (combine with existing data, imported items win for duplicates). Validates the import structure and version compatibility before writing.',
     inputSchema: {
       type: 'object',
@@ -1765,10 +1765,10 @@ const TOOLS = [
 // their old handlers below only so older clients fail gracefully, but never
 // publish them to an assistant.
 const ACTIVE_TOOLS = TOOLS.filter(tool => !new Set([
-  'lingxi_create_event',
-  'lingxi_resolve_event',
-  'lingxi_get_pending_follows',
-  'lingxi_get_summary',
+  'zhigui_create_event',
+  'zhigui_resolve_event',
+  'zhigui_get_pending_follows',
+  'zhigui_get_summary',
 ]).has(tool.name));
 
 // ─── Tool implementation ──────────────────────────────────────────
@@ -1779,15 +1779,15 @@ async function handleToolCall(name, args) {
   // and detail tools still receive complete entities and are the only tools allowed to
   // write state back.
   const indexOnlyTools = new Set([
-    'lingxi_get_overview',
-    'lingxi_get_documents_index',
-    'lingxi_get_topics',
-    'lingxi_get_library',
-    'lingxi_recall',
-    'lingxi_get_context',
+    'zhigui_get_overview',
+    'zhigui_get_documents_index',
+    'zhigui_get_topics',
+    'zhigui_get_library',
+    'zhigui_recall',
+    'zhigui_get_context',
   ]);
   const state = indexOnlyTools.has(name) ? Storage.readState() : readFullState();
-  if (!state && !name.startsWith('lingxi_get_config')) {
+  if (!state && !name.startsWith('zhigui_get_config')) {
     return { error: 'Data read failed. Please ensure ZhiGui is initialized (run start.bat).' };
   }
 
@@ -1798,7 +1798,7 @@ async function handleToolCall(name, args) {
   switch (name) {
 
   // ── Layer-0 retrieval: single consolidated brief manifest (one document, what exists) ──
-  case 'lingxi_get_overview': {
+  case 'zhigui_get_overview': {
     try {
       // This is the daily/self-check entry point. It keeps DDL-derived fields and
       // actionable conflicts fresh whenever the assistant starts from its manifest.
@@ -1819,7 +1819,7 @@ async function handleToolCall(name, args) {
   }
 
   // ── Layer-1 retrieval: document index ──
-  case 'lingxi_get_documents_index': {
+  case 'zhigui_get_documents_index': {
       try {
         // Dynamically generate the index (always fresh), and merge the topic layer, eliminating the "old static index + new topic layer" dual-index confusion
         const docs = [];
@@ -1846,7 +1846,7 @@ async function handleToolCall(name, args) {
         return {
           documents: docs,
           topics: topics,
-          hint: 'Layer-1 index (dynamically generated, always fresh). Use get_document_by_type to read specific documents as needed; for topic context, rely on the activeTopicIndex already injected in get_instructions — it shows what topics exist (layer 1). When you need full details, call lingxi_get_goal_detail / lingxi_get_topic_document / lingxi_get_note_detail (layer 2).',
+          hint: 'Layer-1 index (dynamically generated, always fresh). Use get_document_by_type to read specific documents as needed; for topic context, rely on the activeTopicIndex already injected in get_instructions — it shows what topics exist (layer 1). When you need full details, call zhigui_get_goal_detail / zhigui_get_topic_document / zhigui_get_note_detail (layer 2).',
           usageGuide: {
               'Understand user goals': 'Read goals first, then userProfile as needed',
               'Generate schedule': 'Read goals + errands + notes + schedule',
@@ -1854,7 +1854,7 @@ async function handleToolCall(name, args) {
               'View decisions': 'Only read decisions',
               'View errands': 'Only read errands',
               'View notes': 'Only read notes',
-              'Topic recall': 'Use activeTopicIndex (already in get_instructions) for layer 1; call lingxi_get_goal_detail / lingxi_get_topic_document for layer 2 full details',
+              'Topic recall': 'Use activeTopicIndex (already in get_instructions) for layer 1; call zhigui_get_goal_detail / zhigui_get_topic_document for layer 2 full details',
             },
         };
       } catch (e) {
@@ -1863,7 +1863,7 @@ async function handleToolCall(name, args) {
     }
 
     // ── Hierarchical detail loading (on-demand, saves tokens) ──
-    case 'lingxi_get_goal_detail': {
+    case 'zhigui_get_goal_detail': {
       if (!args.goalId) return { error: 'Missing goalId' };
       try {
         const detail = Storage.getGoalDetail(args.goalId);
@@ -1872,7 +1872,7 @@ async function handleToolCall(name, args) {
       } catch (e) { return { error: 'Failed to load goal detail: ' + e.message }; }
     }
 
-    case 'lingxi_get_note_detail': {
+    case 'zhigui_get_note_detail': {
       if (!args.noteId) return { error: 'Missing noteId' };
       try {
         const detail = Storage.getNoteDetail(args.noteId);
@@ -1881,7 +1881,7 @@ async function handleToolCall(name, args) {
       } catch (e) { return { error: 'Failed to load note detail: ' + e.message }; }
     }
 
-    case 'lingxi_get_day_schedule': {
+    case 'zhigui_get_day_schedule': {
       if (!args.date) return { error: 'Missing date' };
       try {
         const daySchedule = Storage.getDaySchedule(args.date);
@@ -1897,7 +1897,7 @@ async function handleToolCall(name, args) {
       } catch (e) { return { error: 'Failed to load day schedule: ' + e.message }; }
     }
 
-    case 'lingxi_get_days_in_range': {
+    case 'zhigui_get_days_in_range': {
       if (!args.startDate || !args.endDate) return { error: 'Missing startDate or endDate' };
       try {
         const days = Storage.getDaysInRange(args.startDate, args.endDate);
@@ -1912,7 +1912,7 @@ async function handleToolCall(name, args) {
     }
 
     // ── Layer-2 retrieval: read document by type ──
-    case 'lingxi_get_document_by_type': {
+    case 'zhigui_get_document_by_type': {
       const docType = args.type;
       if (!DOCUMENT_FILES[docType]) {
         return { error: `Unknown document type: ${docType}. Available: ${Object.keys(DOCUMENT_FILES).join('/')}` };
@@ -1934,7 +1934,7 @@ async function handleToolCall(name, args) {
     }
 
     // ── Data reading ──
-    case 'lingxi_get_state': {
+    case 'zhigui_get_state': {
       if (args.sections && args.sections.length > 0) {
         const result = {};
         for (const s of args.sections) {
@@ -1945,7 +1945,7 @@ async function handleToolCall(name, args) {
       return state;
     }
 
-    case 'lingxi_get_today': {
+    case 'zhigui_get_today': {
       const today = todayStr();
       const todaySchedule = state.schedule?.days?.[today] || null;
       const briefing = (state.briefings && state.briefings[today])
@@ -1991,7 +1991,7 @@ async function handleToolCall(name, args) {
 
       // Two-layer note retrieval: return AI-authored titles + classification only.
       // Full content lives in notes.json / precipitated topic files and is fetched on demand via
-      // lingxi_get_notes(topicId) or lingxi_get_topic_document(topicId).
+      // zhigui_get_notes(topicId) or zhigui_get_topic_document(topicId).
       const notesBrief = allNotes
         .slice()
         .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
@@ -2023,7 +2023,7 @@ async function handleToolCall(name, args) {
       };
     }
 
-    case 'lingxi_get_history': {
+    case 'zhigui_get_history': {
       const history = readHistory();
       const convs = history.conversations || [];
       if (args.limit && args.limit > 0) {
@@ -2038,20 +2038,20 @@ async function handleToolCall(name, args) {
     // ── Goal management ──
 
     // Auto-extract life notes from goals — REMOVED keyword matching.
-    // The AI should provide notes explicitly via lingxi_add_note, or via facts in lingxi_create_event.
+    // The AI should provide notes explicitly via zhigui_add_note, or via facts in zhigui_create_event.
     // The engine no longer auto-extracts notes from goal titles/descriptions using keyword matching.
     function autoExtractNotesFromGoal(args, state) {
       return [];
     }
 
     // ── Conversation-level auto-sedimentation: REMOVED keyword matching ──
-    // The AI should call lingxi_add_note explicitly when the user mentions something worth remembering.
+    // The AI should call zhigui_add_note explicitly when the user mentions something worth remembering.
     // The engine no longer auto-extracts notes from user messages using keyword matching.
     function autoExtractNotesFromConversation(userMessage, state) {
       return [];
     }
 
-    case 'lingxi_add_goal': {
+    case 'zhigui_add_goal': {
       const typeMap = {
         strategicGoal: 'strategicGoals',
         currentGoal: 'currentGoals',
@@ -2169,7 +2169,7 @@ async function handleToolCall(name, args) {
 
       // If the goal involves a specific date, prompt the AI to create errands
       if (args.type === 'currentGoal' && args.deadline) {
-        hintParts.push('This goal has a deadline. To arrange a concrete execution schedule, call lingxi_auto_schedule.');
+        hintParts.push('This goal has a deadline. To arrange a concrete execution schedule, call zhigui_auto_schedule.');
       }
 
       return {
@@ -2184,7 +2184,7 @@ async function handleToolCall(name, args) {
       };
     }
 
-    case 'lingxi_update_goal': {
+    case 'zhigui_update_goal': {
       const typeMap = {
         strategicGoal: 'strategicGoals',
         currentGoal: 'currentGoals',
@@ -2231,7 +2231,7 @@ async function handleToolCall(name, args) {
       return { success: true, message: `Updated: ${item.title}` };
     }
 
-    case 'lingxi_delete_goal': {
+    case 'zhigui_delete_goal': {
       const typeMap = {
         strategicGoal: 'strategicGoals',
         currentGoal: 'currentGoals',
@@ -2301,7 +2301,7 @@ async function handleToolCall(name, args) {
     }
 
     // ── Schedule tasks ──
-    case 'lingxi_add_task': {
+    case 'zhigui_add_task': {
       state.schedule = state.schedule || {};
       state.schedule.days = state.schedule.days || {};
       const day = state.schedule.days[args.date];
@@ -2326,7 +2326,7 @@ async function handleToolCall(name, args) {
       return { success: true, id: task.id, message: `Added task on ${args.date}: ${args.title}` };
     }
 
-    case 'lingxi_update_task': {
+    case 'zhigui_update_task': {
       const day = state.schedule?.days?.[args.date];
       if (!day) return { error: `No schedule found for ${args.date}` };
       const task = day.tasks.find(t => t.id === args.taskId);
@@ -2362,7 +2362,7 @@ async function handleToolCall(name, args) {
       return { success: true, message: `Updated task: ${task.title}` };
     }
 
-    case 'lingxi_delete_task': {
+    case 'zhigui_delete_task': {
       const day = state.schedule?.days?.[args.date];
       if (!day) return { error: `No schedule found for ${args.date}` };
       const before = day.tasks.length;
@@ -2373,7 +2373,7 @@ async function handleToolCall(name, args) {
     }
 
     // ── Logic computation ──
-    case 'lingxi_recalc_priorities': {
+    case 'zhigui_recalc_priorities': {
       const changes = recalcPriorities(state);
       if (changes.length > 0) {
         // After recalc, re-sort incomplete tasks in the schedule by priority
@@ -2395,7 +2395,7 @@ async function handleToolCall(name, args) {
       };
     }
 
-    case 'lingxi_score_goals': {
+    case 'zhigui_score_goals': {
       // AI-driven priority scoring with contextual reasoning
       const scores = args.scores || [];
       if (scores.length === 0) {
@@ -2470,7 +2470,7 @@ async function handleToolCall(name, args) {
       };
     }
 
-    case 'lingxi_detect_conflicts': {
+    case 'zhigui_detect_conflicts': {
       const conflicts = detectConflicts(state);
       writeState(state);
       return {
@@ -2482,7 +2482,7 @@ async function handleToolCall(name, args) {
     }
 
     // ── Briefing & history ──
-    case 'lingxi_set_briefing': {
+    case 'zhigui_set_briefing': {
       const date = args.date || todayStr();
       // Merge AI-composed text into existing briefing data, preserving structured data
       const existing = (state.briefings && state.briefings[date]) || {};
@@ -2512,23 +2512,23 @@ async function handleToolCall(name, args) {
     }
 
     // ── Event stream system (v3.0 core) ──
-    case 'lingxi_create_event': {
+    case 'zhigui_create_event': {
       return { success: false, retired: true, message: 'The event stream has been retired. Save directly to the appropriate entity: note, goal, action, reminder, or history.' };
     }
 
-    case 'lingxi_resolve_event': {
+    case 'zhigui_resolve_event': {
       return { success: false, retired: true, message: 'The event stream has been retired. Continue with the appropriate entity tool instead.' };
     }
 
-    case 'lingxi_get_pending_follows': {
+    case 'zhigui_get_pending_follows': {
       return { hasPending: false, retired: true, message: 'The event stream has been retired.' };
     }
 
-    case 'lingxi_get_summary': {
+    case 'zhigui_get_summary': {
       return { retired: true, message: 'The event stream has been retired. Use the current entity documents for a review.' };
     }
 
-    case 'lingxi_check_reminders': {
+    case 'zhigui_check_reminders': {
       const triggered = [];
 
       // Also check scheduled time-point reminders (state.reminders)
@@ -2578,7 +2578,7 @@ async function handleToolCall(name, args) {
       };
     }
 
-    case 'lingxi_add_reminder': {
+    case 'zhigui_add_reminder': {
       state.reminders = state.reminders || [];
       const triggerTime = new Date(args.triggerAt);
       if (isNaN(triggerTime.getTime())) {
@@ -2607,11 +2607,11 @@ async function handleToolCall(name, args) {
         success: true,
         id: reminder.id,
         message: `Reminder set: "${args.title}" at ${timeStr} (${args.priority || 'should'}-level)${args.repeat ? ', repeats ' + args.repeat : ''}`,
-        hint: 'This reminder will be checked on every conversation via lingxi_check_reminders. When it fires, the AI will notify the user. It also appears in the morning briefing on the trigger day.',
+        hint: 'This reminder will be checked on every conversation via zhigui_check_reminders. When it fires, the AI will notify the user. It also appears in the morning briefing on the trigger day.',
       };
     }
 
-    case 'lingxi_get_reminders': {
+    case 'zhigui_get_reminders': {
       state.reminders = state.reminders || [];
       const today = todayStr();
       const fromDate = args.from || today;
@@ -2640,7 +2640,7 @@ async function handleToolCall(name, args) {
       };
     }
 
-    case 'lingxi_delete_reminder': {
+    case 'zhigui_delete_reminder': {
       state.reminders = state.reminders || [];
       const before = state.reminders.length;
       state.reminders = state.reminders.filter(rm => rm.id !== args.id);
@@ -2651,7 +2651,7 @@ async function handleToolCall(name, args) {
       return { success: true, message: 'Reminder deleted' };
     }
 
-    case 'lingxi_add_history': {
+    case 'zhigui_add_history': {
       const history = readHistory();
       history.conversations = history.conversations || [];
       const conv = {
@@ -2674,7 +2674,7 @@ async function handleToolCall(name, args) {
     }
 
     // ── Panel control ──
-    case 'lingxi_launch_dashboard': {
+    case 'zhigui_launch_dashboard': {
       // 1) Check whether the dashboard server is already running on port 7788
       const dashboardUrl = 'http://localhost:7788';
       const serverJsPath = path.join(__dirname, '..', 'dashboard', 'server.js');
@@ -2743,21 +2743,21 @@ async function handleToolCall(name, args) {
       };
     }
 
-    case 'lingxi_set_panel': {
+    case 'zhigui_set_panel': {
       state.meta = state.meta || {};
       state.meta.collapsed = args.collapsed;
       writeState(state);
       return { success: true, message: args.collapsed ? 'Panel collapsed' : 'Panel expanded' };
     }
 
-    case 'lingxi_set_theme': {
+    case 'zhigui_set_theme': {
       state.meta = state.meta || {};
       state.meta.theme = args.theme;
       writeState(state);
       return { success: true, message: `Theme switched to ${args.theme}` };
     }
 
-    case 'lingxi_get_config': {
+    case 'zhigui_get_config': {
       return {
         dataDir: CONFIG.dataDir,
         appDir: CONFIG.appDir,
@@ -2769,7 +2769,7 @@ async function handleToolCall(name, args) {
     }
 
     // ── Intelligence layer ──
-    case 'lingxi_get_instructions': {
+    case 'zhigui_get_instructions': {
       return {
         role: 'You are ZhiGui (知归), the user\'s AI scheduling assistant and second brain. You are not a database operator—your job is to actively think, follow up, and plan, helping the user systematically manage time and goals. What you manage is not only "development goals" but also errands, health, relationships, and all other affairs in the user\'s life.',
         legacyDeprecatedRules: [
@@ -2782,8 +2782,8 @@ async function handleToolCall(name, args) {
           '[Conflict Must Be Reminded] When priority conflicts, time conflicts, or constraint violations are detected, you must first remind the user and give suggestions, not arrange things on your own. Only execute after the user confirms.',
           '[Goal Binding] Every goal task in the schedule must be associated with a specific current goal (relatedGoalId) and strategic goal (relatedStrategicGoalId). Orphan tasks are not allowed (except for errands, which are not bound to goals).',
           '[Goal Hierarchy] Current goals can be organized under strategic goals using relatedStrategicGoalId. When creating a current goal, determine if it belongs to an existing strategic goal — if so, set relatedStrategicGoalId. Current goals without a parent appear at the top level alongside strategic goals. The dashboard shows completed goals as hidden; they can be restored from the knowledge base.',
-          '[Cascade Delete · AI Only, With Checklist] The panel does NOT cascade — when the user deletes a goal/task/errand/note on the dashboard, only that item itself is removed (associated schedule tasks are intentionally left for the AI to clean up). Cascade deletion is the AI\'s job: when you delete a goal, call lingxi_delete_goal with confirm:false FIRST to get the cascade manifest (the goal + every associated task with its date), show that checklist to the user for confirmation, THEN call again with confirm:true. Never cascade-delete without the user seeing the checklist first.',
-          '[Topic Cascade Delete · Foreign-Key-Like] When deleting a topic (e.g. "postgrad exam"), call lingxi_delete_topic with confirm:false FIRST to preview the full cascade manifest (goals/actionItems/notes that will be removed), show it to the user, THEN call with confirm:true. Use it when the user says "I don\'t want to take the postgrad exam anymore." Leaving no orphan data is the goal, but the user must confirm the checklist first.',
+          '[Cascade Delete · AI Only, With Checklist] The panel does NOT cascade — when the user deletes a goal/task/errand/note on the dashboard, only that item itself is removed (associated schedule tasks are intentionally left for the AI to clean up). Cascade deletion is the AI\'s job: when you delete a goal, call zhigui_delete_goal with confirm:false FIRST to get the cascade manifest (the goal + every associated task with its date), show that checklist to the user for confirmation, THEN call again with confirm:true. Never cascade-delete without the user seeing the checklist first.',
+          '[Topic Cascade Delete · Foreign-Key-Like] When deleting a topic (e.g. "postgrad exam"), call zhigui_delete_topic with confirm:false FIRST to preview the full cascade manifest (goals/actionItems/notes that will be removed), show it to the user, THEN call with confirm:true. Use it when the user says "I don\'t want to take the postgrad exam anymore." Leaving no orphan data is the goal, but the user must confirm the checklist first.',
           '[AI Organization · Second-Brain File Tree] The AI writes every note title and decides its topic and category. The engine stores those judgments without keyword guessing. When a topic grows, storage may split it into a standalone detail file. Retrieve by title first, then open only one relevant note or topic on demand.',
           '[Value-Based Decision] When multiple goals conflict, make decisions based on the user\'s value system, not simple scoring. If "family health" weight 95 > "academic" weight 75, then accompanying family to the doctor takes priority over postgrad-exam review. The value system is continuously learned and updated through conversation.',
           '[User Profile] Read the user profile when its values, preferences, or style materially help the current decision. Update it only from clear, durable signals—not every conversation.',
@@ -2840,25 +2840,25 @@ async function handleToolCall(name, args) {
           noteExtractionRule: 'Use AI judgment to record only durable, future-useful information. For each note, write a concise summary title and decide its topic and category. Do not use keyword rules and do not treat every sentence as a note.',
           errandRule: 'AI judges whether a concrete request is an action, its urgency, and its lifecycle. One-off actions default to transient; only an explicit commitment or the AI\'s contextual reasoning makes an action MUST-level.',
           valueSystemRule: 'When the user makes a choice ("skip the gathering to review" -> social weight decreases), automatically update the value system. Use the value system to make decisions when multiple goals conflict.',
-          briefingRule: "After auto_schedule, the briefing data contains structured raw data (_raw:true). You MUST call lingxi_set_briefing to compose today's morning briefing. You decide the recommendation — consider priority, cost-perf, domain alignment, user values, and constraints. Write concisely in the panel language. The briefing is your daily decision output, not a template. Suggested sections (flexible): 必须完成 / 今日推荐 / 不建议 / 战略提醒 / 每日一言. Use the 'sections' array when a rigid 5-field split feels unnatural; omit sections that don't add value. Each paragraph should be 1-3 natural sentences.",
-          noteRetrievalRule: 'Two-layer retrieval: Layer 1 exposes every note as id + AI-authored title + topic/category, never a body preview. Layer 2 loads one note with lingxi_get_note_detail(id), or one selected topic with lingxi_get_topic_document(topicId). If the overview marks needsEnrichment=true, load that single note and call lingxi_enrich_note to create a proposal; do not treat that classification as confirmed until the user accepts it in the settings review queue.',
-          organizationRule: 'Classification and summarization are AI responsibilities, while confirmation belongs to the user. When processing notes (whether from conversation or batch import), AI reads content, writes title/topic/category, and must actively detect cross-note contradictions. When contradictions are found, call lingxi_raise_note_conflict to place them in the user review queue with the specific note IDs and excerpts. Do not silently ignore contradictions. All proposals enter the review queue for user confirmation. IMPORTANT — resolution cleanup: when you detect a contradiction between notes and create a new conclusion/resolution note that supersedes the old ones, you MUST call lingxi_delete_note to remove the original conflicting notes. The conclusion note becomes the single source of truth; old notes are clutter.',
-          batchImportRule: 'When the user provides multiple notes at once (pasted text, document content, historical notes), use lingxi_add_note with the "notes" array. Read ALL content first before classifying any note — this lets you: (1) detect contradictions between notes (e.g. the user changed their mind about a preference, timeline conflicts, or factually opposite claims); (2) decide whether related notes should share an existing topic or create a new one; (3) group notes that belong together. For each detected contradiction, call lingxi_raise_note_conflict with the specific note IDs involved. Do not flag contradictions in the enrich_note conflicts field — use the dedicated tool instead. IMPORTANT — resolution cleanup: when you create a conclusion note that resolves a contradiction, call lingxi_delete_note for each superseded source note immediately after adding the conclusion. The conclusion note is the authoritative record; old notes are redundant.',
-          topicReorganizationRule: 'Topics are living structures that evolve with the user\'s life. Proactively evaluate topic health: (1) Split: when a topic grows large and its notes diverge into distinct sub-themes, use lingxi_propose_topic_split; (2) Merge: when multiple topics overlap significantly (e.g. several sub-topics all belong to the same project) and separating them adds noise, use lingxi_propose_topic_merge with sourceTopicIds; (3) Rename: when a topic\'s content has drifted from its original label, use lingxi_propose_topic_rename; (4) Precipitate: when a topic is large enough to deserve its own file, use lingxi_propose_topic_precipitation. All proposals go through the review queue — never restructure topics without user confirmation. There are no automatic thresholds (no 6-note or 15-note rules); use your judgment as an intelligent agent.',
+          briefingRule: "After auto_schedule, the briefing data contains structured raw data (_raw:true). You MUST call zhigui_set_briefing to compose today's morning briefing. You decide the recommendation — consider priority, cost-perf, domain alignment, user values, and constraints. Write concisely in the panel language. The briefing is your daily decision output, not a template. Suggested sections (flexible): 必须完成 / 今日推荐 / 不建议 / 战略提醒 / 每日一言. Use the 'sections' array when a rigid 5-field split feels unnatural; omit sections that don't add value. Each paragraph should be 1-3 natural sentences.",
+          noteRetrievalRule: 'Two-layer retrieval: Layer 1 exposes every note as id + AI-authored title + topic/category, never a body preview. Layer 2 loads one note with zhigui_get_note_detail(id), or one selected topic with zhigui_get_topic_document(topicId). If the overview marks needsEnrichment=true, load that single note and call zhigui_enrich_note to create a proposal; do not treat that classification as confirmed until the user accepts it in the settings review queue.',
+          organizationRule: 'Classification and summarization are AI responsibilities, while confirmation belongs to the user. When processing notes (whether from conversation or batch import), AI reads content, writes title/topic/category, and must actively detect cross-note contradictions. When contradictions are found, call zhigui_raise_note_conflict to place them in the user review queue with the specific note IDs and excerpts. Do not silently ignore contradictions. All proposals enter the review queue for user confirmation. IMPORTANT — resolution cleanup: when you detect a contradiction between notes and create a new conclusion/resolution note that supersedes the old ones, you MUST call zhigui_delete_note to remove the original conflicting notes. The conclusion note becomes the single source of truth; old notes are clutter.',
+          batchImportRule: 'When the user provides multiple notes at once (pasted text, document content, historical notes), use zhigui_add_note with the "notes" array. Read ALL content first before classifying any note — this lets you: (1) detect contradictions between notes (e.g. the user changed their mind about a preference, timeline conflicts, or factually opposite claims); (2) decide whether related notes should share an existing topic or create a new one; (3) group notes that belong together. For each detected contradiction, call zhigui_raise_note_conflict with the specific note IDs involved. Do not flag contradictions in the enrich_note conflicts field — use the dedicated tool instead. IMPORTANT — resolution cleanup: when you create a conclusion note that resolves a contradiction, call zhigui_delete_note for each superseded source note immediately after adding the conclusion. The conclusion note is the authoritative record; old notes are redundant.',
+          topicReorganizationRule: 'Topics are living structures that evolve with the user\'s life. Proactively evaluate topic health: (1) Split: when a topic grows large and its notes diverge into distinct sub-themes, use zhigui_propose_topic_split; (2) Merge: when multiple topics overlap significantly (e.g. several sub-topics all belong to the same project) and separating them adds noise, use zhigui_propose_topic_merge with sourceTopicIds; (3) Rename: when a topic\'s content has drifted from its original label, use zhigui_propose_topic_rename; (4) Precipitate: when a topic is large enough to deserve its own file, use zhigui_propose_topic_precipitation. All proposals go through the review queue — never restructure topics without user confirmation. There are no automatic thresholds (no 6-note or 15-note rules); use your judgment as an intelligent agent.',
         },
         corePrinciples: [
-          'Built-in follow-up: lingxi_add_goal returns needsClarification=true when information is insufficient. At that point you must ask the user questions; do not assume.',
+          'Built-in follow-up: zhigui_add_goal returns needsClarification=true when information is insufficient. At that point you must ask the user questions; do not assume.',
           'Proactive follow-up: when the user states a vague complex goal, follow the seven-dimension framework of questioningFramework to fully understand the situation (what / when / current foundation / available resources / constraints / context / priority). Organize the questions that need to be asked and ask them at once. Do not limit the number of questions, but do not make it feel like an interrogation—use a natural conversational tone, grouping related questions.',
           'Internet search: when the user proposes a goal with a deadline but the date is uncertain (exam / certification / defense / project deadline, etc.), you must first use internet search to confirm the latest date; do not assume.',
-          'One-click planning: after collecting enough information, call lingxi_create_plan to one-click generate a structured plan (phases can be explicitly specified by the AI, or left blank for the system to auto-split by cycle).',
+          'One-click planning: after collecting enough information, call zhigui_create_plan to one-click generate a structured plan (phases can be explicitly specified by the AI, or left blank for the system to auto-split by cycle).',
           'Constraints are rules: constraints are hard rules for schedule generation, not suggestions.',
           'Global view: when adding any new goal, consider its impact on existing goals.',
           'Full-cycle coverage: the schedule covers the entire period from today to the goal deadline, not just a few days.',
           'Conflict first: when a conflict is detected, first remind the user and give solution suggestions; do not silently record or act on your own.',
           'Layered memory: start from the title-only overview; retrieve a note, topic, day, or history only when it is relevant to the current request.',
           'User profile + values: retrieve them when they can change the recommendation or communication style. Update only when there is a clear, durable signal.',
-          'Life notes: record durable context when it will improve a future decision. Call lingxi_add_note with an AI-written title, topic and category. Do not store transient chat.',
-          'Action lifecycle: a concrete one-off action (pick up a package, pay a bill, reply to a message) belongs in lingxi_add_errand with retention="transient" and disappears when completed. Keep it out of notes, topics, and long-term history. Use review only when the result may matter in a near-term review. Promote an outcome to a note only when it is durable context, a decision, a reusable lesson, a stable preference, or a continuing commitment.',
+          'Life notes: record durable context when it will improve a future decision. Call zhigui_add_note with an AI-written title, topic and category. Do not store transient chat.',
+          'Action lifecycle: a concrete one-off action (pick up a package, pay a bill, reply to a message) belongs in zhigui_add_errand with retention="transient" and disappears when completed. Keep it out of notes, topics, and long-term history. Use review only when the result may matter in a near-term review. Promote an outcome to a note only when it is durable context, a decision, a reusable lesson, a stable preference, or a continuing commitment.',
           'Multi-stage plan grouping (planTitle): when a single user message produces MULTIPLE goals that are phases of the same plan (e.g. "wife birthday Aug 1, need to prepare gift AND arrange celebration"), you MUST set the same planTitle for ALL goals in that plan. The engine will auto-set baseTitle and only show the earliest-deadline phase in the current-goals list. Do NOT omit planTitle — without it, each phase appears as a separate goal, cluttering the view.',
         ],
         conflictHandlingRule: {
@@ -2866,7 +2866,7 @@ async function handleToolCall(name, args) {
           description: 'When encountering a conflict, do not act on your own; you must remind the user and give suggestions:',
           steps: [
             '1. Detect conflict: time overlap, constraint violation, priority contradiction, goal overload, value conflict, cross-note contradiction (factual, timeline, value, or goal conflict between notes)',
-            '2. Report note conflicts: when you detect contradictions between notes, call lingxi_raise_note_conflict with the specific note IDs and excerpts. These go into the user review queue for confirmation — do not resolve them silently.',
+            '2. Report note conflicts: when you detect contradictions between notes, call zhigui_raise_note_conflict with the specific note IDs and excerpts. These go into the user review queue for confirmation — do not resolve them silently.',
             '3. State clearly: first explain the conflict content in the reply',
             '4. Give options: list 2-3 solutions for the user to choose from',
             '5. Wait for confirmation: only execute after the user chooses; do not decide for the user',
@@ -2881,32 +2881,32 @@ async function handleToolCall(name, args) {
         layeredRetrievalRule: {
           title: 'Layered Retrieval — read ONE brief manifest, then drill into detail on demand',
           description: 'Storage is layered. At the start of every conversation you read a single brief document that lists what exists; you only open a detailed document when the conversation actually touches that item. This keeps context lean while keeping full awareness.',
-          layer0: 'Call lingxi_get_overview once. It returns every note as id + AI-authored title + classification, alongside other entity titles. That is enough to know what exists.',
-          onDemand: 'Only when a title is relevant, open its detail: note -> lingxi_get_note_detail(id); selected topic -> lingxi_get_topic_document(topicId); goal -> lingxi_get_goal_detail(id); day -> lingxi_get_day_schedule(date).',
-          constraintsExample: 'Constraints appear in the overview as brief titles only. You KNOW constraints exist, but do NOT preload their full text. Only call lingxi_get_document_by_type("goals") (which returns goals + constraints in full) when you are about to generate a schedule (lingxi_auto_schedule) or check a conflict (lingxi_check_impact / lingxi_detect_conflicts) — then enforce them. This is exactly the "know it exists, fetch detail only when used" pattern you want.',
-          notesExample: 'Every note appears in the overview by AI-authored title and classification. Select a relevant title, then call lingxi_get_note_detail(noteId). Read a whole topic document only when the request genuinely concerns the topic as a whole.',
+          layer0: 'Call zhigui_get_overview once. It returns every note as id + AI-authored title + classification, alongside other entity titles. That is enough to know what exists.',
+          onDemand: 'Only when a title is relevant, open its detail: note -> zhigui_get_note_detail(id); selected topic -> zhigui_get_topic_document(topicId); goal -> zhigui_get_goal_detail(id); day -> zhigui_get_day_schedule(date).',
+          constraintsExample: 'Constraints appear in the overview as brief titles only. You KNOW constraints exist, but do NOT preload their full text. Only call zhigui_get_document_by_type("goals") (which returns goals + constraints in full) when you are about to generate a schedule (zhigui_auto_schedule) or check a conflict (zhigui_check_impact / zhigui_detect_conflicts) — then enforce them. This is exactly the "know it exists, fetch detail only when used" pattern you want.',
+          notesExample: 'Every note appears in the overview by AI-authored title and classification. Select a relevant title, then call zhigui_get_note_detail(noteId). Read a whole topic document only when the request genuinely concerns the topic as a whole.',
           neverUpFront: 'Do NOT read goals.json / notes.json / schedule files in full at conversation start. Read the manifest, then drill down one item at a time. Minimal context, maximum awareness.',
         },
         workflow: [
-          '0. [Must first] Call lingxi_get_instructions to get the behavior guide',
-          '1. Call lingxi_get_overview once to read title-only indexes. For every pending note that needs organization, load that single body and call lingxi_enrich_note to queue a proposal. Never silently apply the proposal; it waits for user confirmation in the settings review queue. For the current request, open only the note, goal, topic or day details whose titles are relevant.',
+          '0. [Must first] Call zhigui_get_instructions to get the behavior guide',
+          '1. Call zhigui_get_overview once to read title-only indexes. For every pending note that needs organization, load that single body and call zhigui_enrich_note to queue a proposal. Never silently apply the proposal; it waits for user confirmation in the settings review queue. For the current request, open only the note, goal, topic or day details whose titles are relevant.',
           '1a. If the user\'s goal involves user profile / values -> read the userProfile document',
           '1b. If the user wants to view or schedule -> read the goals + errands + notes + schedule documents',
           '1c. If the user only wants to view one aspect -> only read the corresponding document, not others',
           '1d. If the user needs historical background -> read history.json (still a single file, can be read on demand)',
-          '1e. The active topic index contains titles and classifications only. Do not preload note bodies. Use lingxi_get_note_detail(id) for one selected note or lingxi_get_topic_document(topicId) for one selected topic.',
-          '1f. [Second brain · AI-selected recall] Read the overview topic titles, choose the topic IDs that are genuinely relevant, then call lingxi_recall({ topicIds }). It returns title-only items; do not open every note in a topic by default.',
+          '1e. The active topic index contains titles and classifications only. Do not preload note bodies. Use zhigui_get_note_detail(id) for one selected note or zhigui_get_topic_document(topicId) for one selected topic.',
+          '1f. [Second brain · AI-selected recall] Read the overview topic titles, choose the topic IDs that are genuinely relevant, then call zhigui_recall({ topicIds }). It returns title-only items; do not open every note in a topic by default.',
           '2. Take a deep breath and understand the user\'s intent—what is the user really saying? What is the need?',
           '3. Check whether the information is complete enough for a quality decision. Use the seven-dimension framework (what / when / current state / available resources / constraints / context / priority) as a thinking lens — not a rigid checklist. Different goals need different dimensions; use your judgment to identify what is genuinely missing and ask for those. Check notes and history first to avoid re-asking known information.',
           '4. Ask a follow-up only when the missing answer changes a material decision, creates a commitment, or prevents harm. Otherwise proceed with a reversible assumption and state it. An unscheduled action is valid; do not demand a date or time merely to store it.',
-          '5. Store directly in the appropriate entity: a durable lesson or preference as a note, a real objective as a goal, and a one-off operational request as lingxi_add_errand with retention="transient". Do not create a second audit record.',
-          '5a. Before confirming a new or materially changed schedule, run lingxi_detect_conflicts and reconsider unlocked priorities. Explain material conflicts; do not silently overwrite a user-set time or priority.',
-          '6. [MUST · Reminder check] Call lingxi_check_reminders to check whether any event-driven reminders need to be triggered.',
-          '7. If it is a complex goal with a deadline -> proactively verify any uncertain facts (search the internet for dates, confirm requirements with the user, etc.) before committing to a plan. Record verified facts as notes for future reference, then call lingxi_create_plan.',
-          '8. If it is an ordinary goal -> call lingxi_add_goal (returns needsClarification if information is insufficient)',
-          '9. Call lingxi_check_impact to analyze the impact of the new request on the existing plan -> if there are conflicts, remind the user first',
-          '10. Call lingxi_recalc_priorities to recalculate priorities',
-          '11. Call lingxi_auto_schedule only when the user explicitly asks for a plan or accepts a proposal. A simple meeting, note, or errand must not trigger schedule generation or create unrelated tasks.',
+          '5. Store directly in the appropriate entity: a durable lesson or preference as a note, a real objective as a goal, and a one-off operational request as zhigui_add_errand with retention="transient". Do not create a second audit record.',
+          '5a. Before confirming a new or materially changed schedule, run zhigui_detect_conflicts and reconsider unlocked priorities. Explain material conflicts; do not silently overwrite a user-set time or priority.',
+          '6. [MUST · Reminder check] Call zhigui_check_reminders to check whether any event-driven reminders need to be triggered.',
+          '7. If it is a complex goal with a deadline -> proactively verify any uncertain facts (search the internet for dates, confirm requirements with the user, etc.) before committing to a plan. Record verified facts as notes for future reference, then call zhigui_create_plan.',
+          '8. If it is an ordinary goal -> call zhigui_add_goal (returns needsClarification if information is insufficient)',
+          '9. Call zhigui_check_impact to analyze the impact of the new request on the existing plan -> if there are conflicts, remind the user first',
+          '10. Call zhigui_recalc_priorities to recalculate priorities',
+          '11. Call zhigui_auto_schedule only when the user explicitly asks for a plan or accepts a proposal. A simple meeting, note, or errand must not trigger schedule generation or create unrelated tasks.',
           '12. Append a history record only for a meaningful planning decision.',
           '13. Update the user profile and value system only from a clear durable signal.',
           '14. Reply with the result, any material conflict, and the next decision the user needs to make.',
@@ -2943,14 +2943,14 @@ async function handleToolCall(name, args) {
           domains: 'NO fixed domain list. The AI freely creates value domains (e.g. neural_networks, pets, parenting, freedom) and assigns each a 0-100 weight. When updating, reuse an existing domain label if one already fits, otherwise create a new one. Goals/notes reference these same free-form labels so weighting can match.',
           learningRule: 'Auto-learns when the user makes a choice. E.g. if the user says "skip the gathering to review" -> social weight decreases, academic weight increases. If the user says "I must accompany my wife to extract her tooth" -> family_health weight increases.',
           decisionRule: 'When conflicting, compare the weights of the relevant domains. The higher weight wins. When unsure, you must ask the user.',
-          updateTiming: 'Every time the user makes a clear choice/trade-off, call lingxi_update_value_system to update.',
+          updateTiming: 'Every time the user makes a clear choice/trade-off, call zhigui_update_value_system to update.',
         },
         planningGuide: {
           trigger: 'The user proposes any complex goal with a deadline (exam / certification / thesis / project / fitness challenge / moving, etc.)',
           step1_search: 'If the deadline is uncertain, first use internet search to confirm the latest date (e.g. exam time / certification deadline / defense date); do not assume.',
           step2_ask: 'Fully understand the situation per the seven-dimension questioningFramework; do not limit the number of questions: what / when / current foundation / available resources / constraints / context / priority.',
           step2b_propose_phases: 'In the follow-up phase, the AI designs its own phased plan based on domain semantics—how many phases, each phase\'s name, each phase\'s detail (what to achieve), each phase\'s focus subjects/components, each phase\'s deadline (real timeline). Present this plan as a [conversational proposal] for the user to confirm: the user is the source of truth for the second brain, and can add/remove phases, rename, or adjust dates before landing. Do not decide unilaterally.',
-          step3_plan: 'After the user confirms (or explicitly raises no objection), call lingxi_create_plan and explicitly pass phases (with name/detail/focus/deadline); if not passed, the system auto-splits by cycle into early/mid/late.',
+          step3_plan: 'After the user confirms (or explicitly raises no objection), call zhigui_create_plan and explicitly pass phases (with name/detail/focus/deadline); if not passed, the system auto-splits by cycle into early/mid/late.',
           step4_result: 'The tool creates a strategic goal + phased current goals (bound to the strategic goal, so strategic fit takes effect) + constraints + full-cycle schedule; priorities are computed uniformly by recalcPriorities based on urgency + strategic fit + cost-effectiveness + values, not hand-written.',
           important: 'Do not manually call add_goal + add_task one by one; do not hardcode the "foundation / intensive / sprint" three-phase template—phases should be designed by the AI in conversation based on the goal\'s nature and confirmed by the user.',
         },
@@ -3006,7 +3006,7 @@ async function handleToolCall(name, args) {
           strategicFit: 'Directly serves top-priority strategic goal=25-30, indirectly supports=15-24, unrelated=5-14, contradictory=0-4',
           costBenefit: 'Little time, big gain=25-30, moderate=15-24, high input gradual=10-14, uncertain=5-9',
           errandOverride: 'MUST-level errands do not participate in scoring; they directly take priority over all goal tasks',
-          aiIsDecider: 'The rule-based formula above is only a SAFETY-NET baseline, NOT the final word. You are the decision-maker: read each goal\'s `scoreBreakdown` (it shows urgency/strategicFit/costPerf/relativity + a plain-language explanation of the rule-based number), judge with full context (notes, values, calendar, energy), then call lingxi_score_goals to set the real priority + your reasoning. Once you score a goal it is stored as scoreSource:"ai" and the engine will NOT overwrite it — only nudging on a hard deadline (overdue/≤3d) and flagging aiScoreStale:true after 7 days so you re-decide.',
+          aiIsDecider: 'The rule-based formula above is only a SAFETY-NET baseline, NOT the final word. You are the decision-maker: read each goal\'s `scoreBreakdown` (it shows urgency/strategicFit/costPerf/relativity + a plain-language explanation of the rule-based number), judge with full context (notes, values, calendar, energy), then call zhigui_score_goals to set the real priority + your reasoning. Once you score a goal it is stored as scoreSource:"ai" and the engine will NOT overwrite it — only nudging on a hard deadline (overdue/≤3d) and flagging aiScoreStale:true after 7 days so you re-decide.',
         },
         conflictTypes: {
           'time': 'Two tasks scheduled in the same time slot, or exceeding the constraint time',
@@ -3032,7 +3032,7 @@ async function handleToolCall(name, args) {
           'Light slot': '19-21 PM schedule light tasks',
           'Rest': 'Schedule a 15-minute break every 2 hours; no tasks during the 12-14 lunch break',
           'Constraint deduction': 'Subtract the time occupied by constraints from available time',
-          'Long-cycle phasing': 'The AI designs a phased plan in conversation based on domain semantics (naming / focus / timeline), as a proposal for the user to confirm, then calls lingxi_create_plan with explicit phases; if not passed, the system auto-splits by cycle (early/mid/late). Phase names and pacing are decided in conversation, no longer hardcoded.',
+          'Long-cycle phasing': 'The AI designs a phased plan in conversation based on domain semantics (naming / focus / timeline), as a proposal for the user to confirm, then calls zhigui_create_plan with explicit phases; if not passed, the system auto-splits by cycle (early/mid/late). Phase names and pacing are decided in conversation, no longer hardcoded.',
           'Daily rotation': 'With multiple subjects, rotate different subjects each day',
           'Goal binding': 'Every goal task must be associated with relatedGoalId and relatedStrategicGoalId (except errands)',
         },
@@ -3051,41 +3051,41 @@ async function handleToolCall(name, args) {
           'The daily morning briefing is only generated and rolling-refreshed within the [next few days] window; the panel language is determined by state.meta.lang (en=English, others=Chinese); inspection and reporting must choose the language accordingly',
         ],
         availableTools: [
-          'lingxi_get_instructions - [must call first] get the behavior guide',
-          'lingxi_get_overview - [must call first] LAYER-0 manifest: ONE brief document of every item (goals/constraints/actions/topics/notes); read at conversation start, then drill into detail on demand',
-          'lingxi_get_user_profile - [must call first] read the user profile + value system',
-          'lingxi_update_user_profile - [call during conversation] update the user profile in real time',
-          'lingxi_update_value_system - [call during conversation] update value weights',
-          'lingxi_create_plan - [general planning] one-click generate for any complex goal with a deadline: strategic goal + phased current goals + constraints + schedule (priorities computed uniformly by recalc; lingxi_create_study_plan is an alias)',
-          'lingxi_auto_schedule - generate a schedule proposal only for an explicit planning request',
-          'lingxi_add_goal - add a goal/constraint (auto-follows up when information is insufficient)',
-          'lingxi_delete_goal - delete a goal (auto-cascade-deletes associated schedule tasks)',
-          'lingxi_add_errand - add an errand (must/should/nice priority)',
-          'lingxi_get_errands - get the errand list',
-          'lingxi_complete_errand / lingxi_delete_errand - errand management',
-          'lingxi_add_note - add one or more notes with AI-written title, topic and category; supports batch mode via "notes" array',
-          'lingxi_enrich_note - organize one pending note after loading its body',
-          'lingxi_get_notes / lingxi_delete_note - note management',
-          'lingxi_get_topics / lingxi_get_topic_document - read topics and foreign-key associations',
-          'lingxi_propose_topic_split - propose splitting a topic into sub-topics (review queue)',
-          'lingxi_propose_topic_merge - propose merging related topics into one (review queue; supports multi-source merge)',
-          'lingxi_propose_topic_rename - propose renaming an evolved topic (review queue)',
-          'lingxi_propose_topic_precipitation - propose extracting a topic\'s notes to a standalone file (review queue; AI decides, no automatic threshold)',
-          'lingxi_search_associated - [second brain] associative search: input a topic and get all its associated entities back (JOIN-like)',
-          'lingxi_search - [second brain] global fuzzy retrieval (across notes/goals/events)',
-          'lingxi_recall - find relevant note titles and topic IDs without loading note bodies',
-          'lingxi_delete_topic - [second brain] one-click cascade-delete a topic and all its associations (foreign-key ON DELETE CASCADE-like)',
-          'lingxi_check_impact - analyze the impact of a new goal on the existing plan',
-          'lingxi_get_state / lingxi_get_today / lingxi_get_history - read data',
-          'lingxi_recalc_priorities / lingxi_detect_conflicts - logic computation',
-          'lingxi_set_briefing / lingxi_add_history - briefing and history',
-          'lingxi_set_panel / lingxi_set_theme - panel control',
-          'lingxi_update_goal - goal management',
-          'lingxi_add_task / lingxi_update_task / lingxi_delete_task - task management',
+          'zhigui_get_instructions - [must call first] get the behavior guide',
+          'zhigui_get_overview - [must call first] LAYER-0 manifest: ONE brief document of every item (goals/constraints/actions/topics/notes); read at conversation start, then drill into detail on demand',
+          'zhigui_get_user_profile - [must call first] read the user profile + value system',
+          'zhigui_update_user_profile - [call during conversation] update the user profile in real time',
+          'zhigui_update_value_system - [call during conversation] update value weights',
+          'zhigui_create_plan - [general planning] one-click generate for any complex goal with a deadline: strategic goal + phased current goals + constraints + schedule (priorities computed uniformly by recalc; zhigui_create_study_plan is an alias)',
+          'zhigui_auto_schedule - generate a schedule proposal only for an explicit planning request',
+          'zhigui_add_goal - add a goal/constraint (auto-follows up when information is insufficient)',
+          'zhigui_delete_goal - delete a goal (auto-cascade-deletes associated schedule tasks)',
+          'zhigui_add_errand - add an errand (must/should/nice priority)',
+          'zhigui_get_errands - get the errand list',
+          'zhigui_complete_errand / zhigui_delete_errand - errand management',
+          'zhigui_add_note - add one or more notes with AI-written title, topic and category; supports batch mode via "notes" array',
+          'zhigui_enrich_note - organize one pending note after loading its body',
+          'zhigui_get_notes / zhigui_delete_note - note management',
+          'zhigui_get_topics / zhigui_get_topic_document - read topics and foreign-key associations',
+          'zhigui_propose_topic_split - propose splitting a topic into sub-topics (review queue)',
+          'zhigui_propose_topic_merge - propose merging related topics into one (review queue; supports multi-source merge)',
+          'zhigui_propose_topic_rename - propose renaming an evolved topic (review queue)',
+          'zhigui_propose_topic_precipitation - propose extracting a topic\'s notes to a standalone file (review queue; AI decides, no automatic threshold)',
+          'zhigui_search_associated - [second brain] associative search: input a topic and get all its associated entities back (JOIN-like)',
+          'zhigui_search - [second brain] global fuzzy retrieval (across notes/goals/events)',
+          'zhigui_recall - find relevant note titles and topic IDs without loading note bodies',
+          'zhigui_delete_topic - [second brain] one-click cascade-delete a topic and all its associations (foreign-key ON DELETE CASCADE-like)',
+          'zhigui_check_impact - analyze the impact of a new goal on the existing plan',
+          'zhigui_get_state / zhigui_get_today / zhigui_get_history - read data',
+          'zhigui_recalc_priorities / zhigui_detect_conflicts - logic computation',
+          'zhigui_set_briefing / zhigui_add_history - briefing and history',
+          'zhigui_set_panel / zhigui_set_theme - panel control',
+          'zhigui_update_goal - goal management',
+          'zhigui_add_task / zhigui_update_task / zhigui_delete_task - task management',
         ],
         // ── Second brain · topic index (layer 1): lightweight overview of what topics exist ──
         // The AI sees this at conversation start and knows WHAT topics exist + a summary.
-        // Full details are retrieved on demand via layer 2 tools (lingxi_get_goal_detail etc.)
+        // Full details are retrieved on demand via layer 2 tools (zhigui_get_goal_detail etc.)
         activeTopicIndex: (() => {
           try {
             const brain = getBrainIndex();
@@ -3096,7 +3096,7 @@ async function handleToolCall(name, args) {
             return ctx.hasContext ? ctx : null;
           } catch { return null; }
         })(),
-        topicRecallHint: 'This is a title-only Layer-1 index. It tells you what exists without exposing note bodies. Use lingxi_get_note_detail(id) for one selected note, or lingxi_get_topic_document(topicId) for one selected topic.',
+        topicRecallHint: 'This is a title-only Layer-1 index. It tells you what exists without exposing note bodies. Use zhigui_get_note_detail(id) for one selected note, or zhigui_get_topic_document(topicId) for one selected topic.',
         // ── User identity / background (participates in every decision) ──
         // The user's self-described identity (e.g. "大二学生，学过 XXXX") is stored in
         // userProfile.notes and MUST be considered when following up, planning, and advising.
@@ -3120,7 +3120,7 @@ async function handleToolCall(name, args) {
     // (mapGoalToDomain, getDomainWeight, analyzeNotesContext, getProfileAwareSlots, isOneShotGoal)
     // Access via Scheduler.* throughout this file.
 
-    case 'lingxi_auto_schedule': {
+    case 'zhigui_auto_schedule': {
       // 1. Read all data
       const goals = state.currentGoals || [];
       const strategicGoals = state.strategicGoals || [];
@@ -3174,7 +3174,7 @@ async function handleToolCall(name, args) {
           success: false,
           reason: 'no_active_goals',
   message: 'There are currently no active current goals; cannot generate a schedule. Please add current goals first (type=currentGoal; detail is required, deadline is optional), then call this tool again.',
-  hint: 'If the user only stated a strategic goal (e.g. "pass the postgrad exam" / "finish the thesis"), you need to first follow the framework to ask for specific information, then help the user create current goals, or call lingxi_create_plan to one-click generate a structured plan, then call auto_schedule.',
+  hint: 'If the user only stated a strategic goal (e.g. "pass the postgrad exam" / "finish the thesis"), you need to first follow the framework to ask for specific information, then help the user create current goals, or call zhigui_create_plan to one-click generate a structured plan, then call auto_schedule.',
           strategicGoalsCount: strategicGoals.length,
           constraintsCount: constraints.length,
         };
@@ -3296,7 +3296,7 @@ async function handleToolCall(name, args) {
       // 10. Return the complete plan
       return {
         success: true,
-        message: `Generated schedule (starting ${startDate}). IMPORTANT: call lingxi_set_briefing to compose today's morning briefing — read the raw briefing data (state.briefings[today]._raw) to base your natural-language composition on the actual schedule, goals, constraints, and value system. Suggested structure (flexible): 必须完成 / 今日推荐 / 不建议 / 战略提醒 / 每日一言. Use the 'sections' array when a rigid split feels unnatural; omit sections that don't add value.`,
+        message: `Generated schedule (starting ${startDate}). IMPORTANT: call zhigui_set_briefing to compose today's morning briefing — read the raw briefing data (state.briefings[today]._raw) to base your natural-language composition on the actual schedule, goals, constraints, and value system. Suggested structure (flexible): 必须完成 / 今日推荐 / 不建议 / 战略提醒 / 每日一言. Use the 'sections' array when a rigid split feels unnatural; omit sections that don't add value.`,
         totalDays: SCHEDULE_DAYS,
         phases: (() => {
           const names = new Set();
@@ -3351,7 +3351,7 @@ async function handleToolCall(name, args) {
         },
         briefing: state.morningBriefing,
         // AI-dominance: list goals the rigid formula silently scored (no AI judgment yet), so the
-        // AI is explicitly asked to review + re-score them via lingxi_score_goals instead of the
+        // AI is explicitly asked to review + re-score them via zhigui_score_goals instead of the
         // engine deciding for them. Locked goals are excluded (user-fixed).
         needsAiScore: state.currentGoals
           .filter(g => !g.completed && !g.locked && g.scoreSource !== 'ai')
@@ -3362,7 +3362,7 @@ async function handleToolCall(name, args) {
             daysLeft: g.daysLeft,
             overdue: g.overdue,
             scoreBreakdown: g.scoreBreakdown || null,
-            hint: 'Rule-based score only — review with full context and call lingxi_score_goals to set the real priority + your reasoning.',
+            hint: 'Rule-based score only — review with full context and call zhigui_score_goals to set the real priority + your reasoning.',
           })),
         notes_text: schedulingNotes,
         activeGoals: activeGoals.map(g => ({
@@ -3378,7 +3378,7 @@ async function handleToolCall(name, args) {
       };
     }
 
-    case 'lingxi_check_impact': {
+    case 'zhigui_check_impact': {
       const goals = state.currentGoals || [];
       const constraints = state.constraints || [];
       const strategicGoals = state.strategicGoals || [];
@@ -3551,13 +3551,13 @@ async function handleToolCall(name, args) {
       };
     }
 
-    case 'lingxi_create_plan':
-    case 'lingxi_create_study_plan': {
+    case 'zhigui_create_plan':
+    case 'zhigui_create_study_plan': {
       return await buildPlan(state, args);
     }
 
     // ── User profile ──
-    case 'lingxi_get_user_profile': {
+    case 'zhigui_get_user_profile': {
       const profile = state.userProfile || {
         personality: '',
         communicationStyle: '',
@@ -3578,7 +3578,7 @@ async function handleToolCall(name, args) {
       };
     }
 
-    case 'lingxi_update_user_profile': {
+    case 'zhigui_update_user_profile': {
       state.userProfile = state.userProfile || {
         personality: '',
         communicationStyle: '',
@@ -3620,7 +3620,7 @@ async function handleToolCall(name, args) {
     }
 
     // ── Errand system ──
-    case 'lingxi_add_errand': {
+    case 'zhigui_add_errand': {
       if (!args.title) {
         return {
           needsClarification: true,
@@ -3697,7 +3697,7 @@ async function handleToolCall(name, args) {
       };
     }
 
-    case 'lingxi_get_errands': {
+    case 'zhigui_get_errands': {
       state.errands = state.errands || [];
       let result = state.errands;
 
@@ -3729,7 +3729,7 @@ async function handleToolCall(name, args) {
       };
     }
 
-    case 'lingxi_complete_errand': {
+    case 'zhigui_complete_errand': {
       state.errands = state.errands || [];
       const errandIndex = state.errands.findIndex(e => e.id === args.id);
       const errand = state.errands[errandIndex];
@@ -3746,7 +3746,7 @@ async function handleToolCall(name, args) {
       return { success: true, message: `Completed: ${errand.title}` };
     }
 
-    case 'lingxi_delete_errand': {
+    case 'zhigui_delete_errand': {
       state.errands = state.errands || [];
       const before = state.errands.length;
       state.errands = state.errands.filter(e => e.id !== args.id);
@@ -3756,7 +3756,7 @@ async function handleToolCall(name, args) {
     }
 
     // ── Life notes system ──
-    case 'lingxi_add_note': {
+    case 'zhigui_add_note': {
       // Batch mode: AI sends a "notes" array after reading all content holistically
       if (Array.isArray(args.notes) && args.notes.length > 0) {
         const source = args.source || 'batch-import';
@@ -3775,35 +3775,35 @@ async function handleToolCall(name, args) {
       return Actions.execute('note.add', { ...args, source: args.source || 'extracted from conversation' });
     }
 
-    case 'lingxi_enrich_note': {
+    case 'zhigui_enrich_note': {
       return Actions.execute('note.propose_enrichment', args);
     }
 
-    case 'lingxi_raise_setting_conflict': {
+    case 'zhigui_raise_setting_conflict': {
       return Actions.execute('review.raise_conflict', args);
     }
 
-    case 'lingxi_raise_note_conflict': {
+    case 'zhigui_raise_note_conflict': {
       return Actions.execute('review.raise_note_conflict', args);
     }
 
-    case 'lingxi_propose_topic_split': {
+    case 'zhigui_propose_topic_split': {
       return Actions.execute('topic.propose_split', args);
     }
 
-    case 'lingxi_propose_topic_merge': {
+    case 'zhigui_propose_topic_merge': {
       return Actions.execute('topic.propose_merge', args);
     }
 
-    case 'lingxi_propose_topic_rename': {
+    case 'zhigui_propose_topic_rename': {
       return Actions.execute('topic.propose_rename', args);
     }
 
-    case 'lingxi_propose_topic_precipitation': {
+    case 'zhigui_propose_topic_precipitation': {
       return Actions.execute('topic.propose_precipitation', args);
     }
 
-    case 'lingxi_get_notes': {
+    case 'zhigui_get_notes': {
       if (!args.topicId && !args.domain) {
         let notes = Storage.readLightweightState().notes || [];
         if (args.limit) notes = notes.slice(-args.limit);
@@ -3816,7 +3816,7 @@ async function handleToolCall(name, args) {
       return { count: notes.length, notes, detailLoaded: true };
     }
 
-    case 'lingxi_delete_note': {
+    case 'zhigui_delete_note': {
       state.notes = Array.isArray(state.notes) ? state.notes : [];
       const before = state.notes.length;
       const target = state.notes.find(n => n.id === args.id);
@@ -3834,7 +3834,7 @@ async function handleToolCall(name, args) {
     }
 
     // ── Value system ──
-    case 'lingxi_update_value_system': {
+    case 'zhigui_update_value_system': {
       state.userProfile = state.userProfile || {};
       state.userProfile.valueSystem = state.userProfile.valueSystem || {
         priorities: [],
@@ -3914,14 +3914,14 @@ async function handleToolCall(name, args) {
     }
 
     // ── Second brain · association index ──
-    case 'lingxi_get_topics': {
+    case 'zhigui_get_topics': {
       try {
         const brain = getBrainIndex();
         return { topics: brain.getTopics(), total: brain.getTopics().length };
       } catch (e) { return { error: 'Failed to read topics: ' + e.message, topics: [] }; }
     }
 
-    case 'lingxi_get_library': {
+    case 'zhigui_get_library': {
       try {
         const brain = getBrainIndex();
         const library = brain.getLibrary();
@@ -3935,7 +3935,7 @@ async function handleToolCall(name, args) {
       } catch (e) { return { error: 'Failed to read library: ' + e.message }; }
     }
 
-    case 'lingxi_update_library': {
+    case 'zhigui_update_library': {
       try {
         const brain = getBrainIndex();
         const result = brain.updateLibrary(args);
@@ -3943,7 +3943,7 @@ async function handleToolCall(name, args) {
       } catch (e) { return { error: 'Failed to update library: ' + e.message }; }
     }
 
-    case 'lingxi_get_topic_document': {
+    case 'zhigui_get_topic_document': {
       if (!args.topicId) return { error: 'Missing topicId' };
       try {
         const brain = getBrainIndex();
@@ -3953,7 +3953,7 @@ async function handleToolCall(name, args) {
       } catch (e) { return { error: 'Failed to read topic document: ' + e.message }; }
     }
 
-    case 'lingxi_search_associated': {
+    case 'zhigui_search_associated': {
       if (!args.query) return { error: 'Missing query' };
       try {
         const brain = getBrainIndex();
@@ -3961,7 +3961,7 @@ async function handleToolCall(name, args) {
       } catch (e) { return { error: 'Association search failed: ' + e.message }; }
     }
 
-    case 'lingxi_search': {
+    case 'zhigui_search': {
       if (!args.query) return { error: 'Missing query' };
       try {
         const brain = getBrainIndex();
@@ -3969,7 +3969,7 @@ async function handleToolCall(name, args) {
       } catch (e) { return { error: 'Search failed: ' + e.message }; }
     }
 
-    case 'lingxi_recall': {
+    case 'zhigui_recall': {
       // AI-selected recall only. This early return intentionally bypasses the
       // legacy lexical matcher below; topic relevance is decided by the AI from
       // the Layer-0 manifest, not by character overlap or stored keywords.
@@ -4047,7 +4047,7 @@ async function handleToolCall(name, args) {
                 goals: (rel.goals || []).length,
                 actionItems: (rel.actionItems || []).length,
               },
-              hint: `Call lingxi_get_topic_document("${t.id}") for the full notes of this topic.`,
+              hint: `Call zhigui_get_topic_document("${t.id}") for the full notes of this topic.`,
             });
           }
         }
@@ -4060,7 +4060,7 @@ async function handleToolCall(name, args) {
           matched: true,
           recalledFrom: top.length,
           topics: top,
-          guidance: 'These prior notes are relevant to the user\'s message. Use them to inform your reply, follow-up questions, and any scheduling/planning. Call lingxi_get_topic_document(topicId) for full content when needed.',
+          guidance: 'These prior notes are relevant to the user\'s message. Use them to inform your reply, follow-up questions, and any scheduling/planning. Call zhigui_get_topic_document(topicId) for full content when needed.',
         };
       } catch (e) {
         return { matched: false, error: 'Recall failed: ' + e.message };
@@ -4069,9 +4069,9 @@ async function handleToolCall(name, args) {
       */
     }
 
-    case 'lingxi_get_context': {
+    case 'zhigui_get_context': {
       if (!args.topicIds || !Array.isArray(args.topicIds)) {
-        return { hasContext: false, items: [], error: 'Missing topicIds. Call lingxi_get_topics first to see available topics, then pass the relevant ones.' };
+        return { hasContext: false, items: [], error: 'Missing topicIds. Call zhigui_get_topics first to see available topics, then pass the relevant ones.' };
       }
       try {
         const brain = getBrainIndex();
@@ -4080,7 +4080,7 @@ async function handleToolCall(name, args) {
       } catch (e) { return { hasContext: false, items: [], error: 'Context retrieval failed: ' + e.message }; }
     }
 
-    case 'lingxi_delete_topic': {
+    case 'zhigui_delete_topic': {
       if (!args.topicId) return { error: 'Missing topicId' };
       if (args.confirm !== true) {
         // Preview (dry-run): list exactly what WILL be deleted; do NOT execute.
@@ -4101,13 +4101,13 @@ async function handleToolCall(name, args) {
       } catch (e) { return { error: 'Cascade delete failed: ' + e.message }; }
     }
 
-    case 'lingxi_delete_history': {
+    case 'zhigui_delete_history': {
       if (args.confirm !== true) {
         return { aborted: true, reason: 'Set confirm to true to execute the delete.' };
       }
       // Clear canonical data (goals/notes/actions/schedule/briefings/topics/reminders/library).
       // Preserves only userProfile (user preferences should not be reset).
-      const dataDir = LINGXI_DIR;
+      const dataDir = ZHIGUI_DIR;
       const cleared = {};
       // state.json (aggregated state: goals, errands, schedule, briefings, conflicts, constraints, notes, reminders)
       const st = readFullState();
@@ -4206,7 +4206,7 @@ async function handleToolCall(name, args) {
       };
     }
 
-    case 'lingxi_clear_briefings': {
+    case 'zhigui_clear_briefings': {
       if (args.confirm !== true) {
         return { aborted: true, reason: 'Set confirm to true to execute the delete.' };
       }
@@ -4218,12 +4218,12 @@ async function handleToolCall(name, args) {
     }
 
     // ── Data Export / Import ──
-    case 'lingxi_export_data': {
+    case 'zhigui_export_data': {
       try {
         const { exportData } = require('./export-import');
         const dataDir = CONFIG.dataDir;
         // Auto-generate output path if not provided
-        const outputPath = args.outputPath || path.join(dataDir, `lingxi-export-${DateUtils.todayStr()}.json`);
+        const outputPath = args.outputPath || path.join(dataDir, `zhigui-export-${DateUtils.todayStr()}.json`);
         const result = exportData(dataDir, { outputPath });
         return {
           success: true,
@@ -4237,7 +4237,7 @@ async function handleToolCall(name, args) {
       }
     }
 
-    case 'lingxi_import_data': {
+    case 'zhigui_import_data': {
       try {
         const { importData } = require('./export-import');
         const dataDir = CONFIG.dataDir;
@@ -4302,7 +4302,7 @@ rl.on('line', async (line) => {
         result: {
           protocolVersion: PROTOCOL_VERSION,
           capabilities: { tools: {} },
-          serverInfo: { name: 'lingxi', version: '1.0.0' },
+          serverInfo: { name: 'zhigui', version: '1.0.0' },
         },
       });
       break;

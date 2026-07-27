@@ -18,8 +18,8 @@ echo.
 REM ===== Get project dir (strip trailing backslash) =====
 set "APP_DIR=%~dp0"
 if "!APP_DIR:~-1!"=="\" set "APP_DIR=!APP_DIR:~0,-1!"
-set "DATA_DIR=!APP_DIR!\.lingxi"
-set "SKILL_DIR=%USERPROFILE%\.workbuddy\skills\lingxi"
+set "DATA_DIR=!APP_DIR!\.zhigui"
+set "SKILL_DIR=%USERPROFILE%\.workbuddy\skills\zhigui"
 
 echo   Project: !APP_DIR!
 echo   Data:   !DATA_DIR!

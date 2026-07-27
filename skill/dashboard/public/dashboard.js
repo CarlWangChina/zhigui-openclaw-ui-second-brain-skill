@@ -2676,7 +2676,7 @@ function translateTaskTitle(title) {
 
 // ===== Related Notes (mem.ai-style auto-push) =====
 // Shows the most recent notes from the second brain, ordered by recency.
-// When the AI calls lingxi_get_context, the relevant notes are pushed to the user
+// When the AI calls zhigui_get_context, the relevant notes are pushed to the user
 // via the conversation; this panel provides a visual snapshot.
 function renderRelatedNotes() {
   const container = document.getElementById('related-notes-container');
