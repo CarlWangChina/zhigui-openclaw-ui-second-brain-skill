@@ -59,25 +59,41 @@ echo   Node.js: !NODE_EXE!
 echo.
 
 REM ===== Check if Electron is installed =====
-if not exist "!APP_DIR!\node_modules\electron\dist\electron.exe" (
-    echo   First run: installing Electron...
-    echo.
-    set "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/"
-    "!NPM_CMD!" install --registry=https://registry.npmmirror.com
-    echo.
-    echo   Downloading Electron binary...
-    "!NODE_EXE!" "!APP_DIR!\node_modules\electron\install.js"
-    if not exist "!APP_DIR!\node_modules\electron\dist\electron.exe" (
-        echo.
-        echo   [ERROR] Electron not found after npm install.
-        echo   Try: "!NPM_CMD!" install --registry=https://registry.npmmirror.com
-        pause
-        exit /b 1
-    )
-    echo.
-    echo   Electron installed.
-    echo.
-)
+if exist "!APP_DIR!\node_modules\electron\dist\electron.exe" goto :electron_ok
+
+echo   First run: installing dependencies...
+echo.
+set "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/"
+call "!NPM_CMD!" install --registry=https://registry.npmmirror.com
+if !errorlevel! neq 0 goto :npm_failed
+
+echo.
+echo   Downloading Electron binary...
+"!NODE_EXE!" "!APP_DIR!\node_modules\electron\install.js"
+if !errorlevel! neq 0 goto :electron_failed
+
+if not exist "!APP_DIR!\node_modules\electron\dist\electron.exe" goto :electron_failed
+
+echo.
+echo   Electron installed.
+echo.
+goto :electron_ok
+
+:npm_failed
+echo.
+echo   [ERROR] npm install failed.
+echo   Try manually: "!NPM_CMD!" install --registry=https://registry.npmmirror.com
+pause
+exit /b 1
+
+:electron_failed
+echo.
+echo   [ERROR] Electron binary download failed.
+echo   Try manually: "!NODE_EXE!" "!APP_DIR!\node_modules\electron\install.js"
+pause
+exit /b 1
+
+:electron_ok
 
 REM ===== Run setup script (engine install, config, data init, MCP register) =====
 echo   Running setup...
