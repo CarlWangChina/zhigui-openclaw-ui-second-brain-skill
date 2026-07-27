@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "createdAt": "2026-07-23T11:45:04.951Z",
+  "categories": {
+    "Career": {
+      "icon": "📁",
+      "topics": []
+    },
+    "Learning": {
+      "icon": "📁",
+      "topics": []
+    }
+  },
+  "topics": {}
+}

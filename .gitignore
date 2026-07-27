@@ -1,9 +1,5 @@
-# === Dependencies ===
-node_modules/
-
-# === Local runtime data (user-specific — never publish) ===
-.zhigui/
-.lingxi/
+# === Dependencies (included in repo for out-of-box use) ===
+# node_modules/  — intentionally included so users don't need npm install
 
 # === IDE / local tool configs (contain machine-specific paths) ===
 .trae/
@@ -15,13 +11,14 @@ node_modules/
 backups/
 .git.zhs-backup/
 
-# === Generated artifacts & screenshots ===
-reports/
-security_report.md
-test-cases.md
+# === OS metadata ===
+Thumbs.db
+ehthumbs.db
+.DS_Store
 
-# === Deprecated old UI (superseded by skill/dashboard) ===
-legacy/
+# === Local environment files (may contain secrets) ===
+.env
+.env.*
 
 # === Backup / temp files ===
 *.bak

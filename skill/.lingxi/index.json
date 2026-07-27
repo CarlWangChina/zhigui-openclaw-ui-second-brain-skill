@@ -1,0 +1,23 @@
+{
+  "version": "3.1.0",
+  "meta": {
+    "version": "3.1.0",
+    "lastUpdated": "2026-07-25T17:19:34.919Z",
+    "topicThreshold": 6,
+    "autoTopicFreq": 4,
+    "keywordFreq": {}
+  },
+  "topics": {},
+  "categories": {
+    "Career": {
+      "topicCount": 6,
+      "totalNotes": 0,
+      "promoted": false
+    },
+    "Learning": {
+      "topicCount": 1,
+      "totalNotes": 0,
+      "promoted": false
+    }
+  }
+}

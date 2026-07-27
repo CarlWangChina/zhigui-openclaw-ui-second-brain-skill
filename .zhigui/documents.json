@@ -1,0 +1,44 @@
+{
+  "meta": {
+    "version": "2.1.0",
+    "lastUpdated": "2026-07-27T07:22:01.405Z",
+    "description": "ZhiGui document index - first-layer retrieval"
+  },
+  "documents": [
+    {
+      "type": "goals",
+      "title": "Goals & Constraints",
+      "description": "Strategic goals, current goals, constraint principles",
+      "lastUpdated": "2026-07-27T07:22:01.405Z",
+      "size": 185
+    },
+    {
+      "type": "schedule",
+      "title": "Schedule & Morning Briefing",
+      "description": "Schedule, daily morning briefing, conflict detection",
+      "lastUpdated": "2026-07-27T07:22:01.405Z",
+      "size": 219
+    },
+    {
+      "type": "errands",
+      "title": "Errands",
+      "description": "must/should/nice three-tier errands",
+      "lastUpdated": "2026-07-27T07:22:01.405Z",
+      "size": 137
+    },
+    {
+      "type": "notes",
+      "title": "Life Notes",
+      "description": "AI-titled notes with layered on-demand detail",
+      "lastUpdated": "2026-07-27T07:22:01.405Z",
+      "size": 133
+    },
+    {
+      "type": "userProfile",
+      "title": "User Profile",
+      "description": "User profile, value system, communication preferences",
+      "lastUpdated": "2026-07-27T07:22:01.405Z",
+      "size": 501
+    }
+  ]
+}

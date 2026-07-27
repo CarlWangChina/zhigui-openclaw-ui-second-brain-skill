@@ -1,0 +1,23 @@
+{
+  "date": "2026-07-24",
+  "weekday": "Fri",
+  "tasks": [
+    {
+      "id": "t_mrxrzfhy6rm9",
+      "time": "09:00",
+      "duration": 120,
+      "title": "完成第二大脑项目初版",
+      "description": "交付一个可运行的第二大脑应用初版，包含核心笔记管理、AI分类、智能检索等基础功能",
+      "priority": 60,
+      "costPerf": 6,
+      "completed": false,
+      "source": "ai",
+      "category": "study",
+      "relatedGoalId": "cg_mrxrz9n4ohzq",
+      "relatedStrategicGoalId": null,
+      "completedAt": "2026-07-24T06:29:10.841Z",
+      "completedBy": "user"
+    }
+  ],
+  "updatedAt": "2026-07-25T17:19:34.954Z"
+}
