@@ -64,9 +64,10 @@ if not exist "!APP_DIR!\node_modules\electron\dist\electron.exe" (
     echo.
     set "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/"
     "!NPM_CMD!" install --registry=https://registry.npmmirror.com
-    if !errorlevel! neq 0 (
+    if not exist "!APP_DIR!\node_modules\electron\dist\electron.exe" (
         echo.
-        echo   [ERROR] npm install failed. Check your network.
+        echo   [ERROR] Electron not found after npm install.
+        echo   Try: "!NPM_CMD!" install --registry=https://registry.npmmirror.com
         pause
         exit /b 1
     )
