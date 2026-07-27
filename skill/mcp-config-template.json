@@ -1,0 +1,32 @@
+{
+  "_comment": "Lingxi MCP Server cross-platform config template — copy the config for your tool and replace <skill_directory> with the actual absolute path",
+
+  "trae": {
+    "_config_file": "Trae Settings > MCP > Add > Manual Add",
+    "_note": "In Trae: Settings > MCP > Add > Manual Add, then paste the JSON. If 'node' is not on PATH, use the absolute path to node.exe (forward slashes recommended).",
+    "mcpServers": {
+      "lingxi": {
+        "command": "node",
+        "args": ["<skill_directory>/engine/server.js"]
+      }
+    }
+  },
+
+  "generic_mcp": {
+    "_note": "Standard MCP stdio config — works with any MCP-compatible AI tool. Refer to your tool's docs for where to paste this.",
+    "mcpServers": {
+      "lingxi": {
+        "command": "node",
+        "args": ["<skill_directory>/engine/server.js"]
+      }
+    }
+  },
+
+  "_tips": [
+    "1. If 'node' is not on PATH, replace \"node\" with the absolute path to your node.exe (use forward slashes, e.g. C:/Program Files/nodejs/node.exe). Paths with spaces may fail in some tools — prefer a space-free path.",
+    "2. In JSON, backslashes must be doubled (\\\\), or simply use forward slashes (/).",
+    "3. No env block needed — the engine auto-detects its data directory.",
+    "4. The dashboard server (port 7788) does not need to be running for MCP to work.",
+    "5. The MCP Server reads/writes JSON files directly; the dashboard auto-refreshes via fs.watch."
+  ]
+}

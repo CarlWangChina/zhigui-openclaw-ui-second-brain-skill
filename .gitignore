@@ -1,0 +1,36 @@
+# === Dependencies ===
+node_modules/
+
+# === Local runtime data (user-specific — never publish) ===
+.lingxi/
+.zhigui/
+.workbuddy/
+
+# === IDE / local tool configs (contain machine-specific paths) ===
+.trae/
+.cursor/
+.mcp.json
+
+# === Backups ===
+backups/
+.git.zhs-backup/
+
+# === Generated artifacts & screenshots ===
+reports/
+security_report.md
+test-cases.md
+
+# === Deprecated old UI (superseded by skill/dashboard) ===
+legacy/
+
+# === Backup / temp files ===
+*.bak
+*.tmp
+
+# === Windows junk (reserved-name files from stray redirections) ===
+nul
+
+# === OS metadata ===
+Thumbs.db
+ehthumbs.db
+.DS_Store

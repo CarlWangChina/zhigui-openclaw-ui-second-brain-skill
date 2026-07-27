@@ -1,0 +1,15 @@
+{
+  "name": "lingxi",
+  "version": "1.0.0",
+  "description": "灵犀 · 决策与规划助理 - 桌面侧边栏应用",
+  "main": "skill/electron/main.js",
+  "scripts": {
+    "start": "electron skill/electron/main.js",
+    "dev": "electron skill/electron/main.js --dev"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^43.1.0"
+  }
+}

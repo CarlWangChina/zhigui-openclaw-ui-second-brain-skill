@@ -1,0 +1,16 @@
+{
+  "name": "lingxi-skill",
+  "version": "1.0.0",
+  "description": "ZhiGui 知归 - Decision & Planning Companion - self-contained skill package (engine + dashboard + Electron)",
+  "private": true,
+  "scripts": {
+    "dashboard": "node dashboard/server.js",
+    "electron": "electron electron/main.js",
+    "test": "node test/integration-actions.js && node test/http-dashboard.js"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^43.1.0"
+  }
+}
