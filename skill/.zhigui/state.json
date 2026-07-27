@@ -1,0 +1,39 @@
+{
+  "meta": {
+    "version": "3.1.0",
+    "lastUpdated": "2026-07-27T07:29:30.099Z",
+    "theme": "dark",
+    "collapsed": true
+  },
+  "strategicGoals": [],
+  "constraints": [],
+  "currentGoals": [],
+  "schedule": {
+    "weekOf": "",
+    "days": {}
+  },
+  "morningBriefing": null,
+  "conflicts": [],
+  "briefings": {},
+  "errands": [],
+  "notes": [],
+  "pendingReviews": [],
+  "importBatches": [],
+  "userProfile": {
+    "personality": "",
+    "communicationStyle": "",
+    "preferredTools": [],
+    "workHabit": "",
+    "interests": [],
+    "tonePreference": "",
+    "responseDetail": "",
+    "languageStyle": "",
+    "notes": "",
+    "conversationCount": 0,
+    "valueSystem": {
+      "priorities": [],
+      "decisionStyle": "balanced",
+      "learnedFrom": []
+    }
+  }
+}
