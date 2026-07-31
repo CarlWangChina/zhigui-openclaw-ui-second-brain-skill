@@ -20,7 +20,7 @@ ZhiGui's design draws inspiration from three classic archetypes:
 |------|-------------|
 | **Secretary** | Gives you the full picture at a glance — today's schedule, overdue tasks, goals in progress, morning briefings, and daily reflections. |
 | **Butler** | Quietly manages everything behind the scenes — note archiving, topic classification, action tracking, decision recording. You never worry about where data is stored. |
-| **Mentor** | Inspired by Yao Lao from *Battle Through the Heavens* — a wise mentor hidden in your consciousness. He won't make decisions for you, but offers precise counsel: what not to do, which goals are fantasy, which decisions plant hidden risks. |
+| **Mentor** | Inspired by Yao Lao from *Battle Through the Heavens* — a wise mentor hidden in your consciousness. Based on the information you provide, he helps you make decisions and plans: what to do first, what to do later, which task offers the best ROI, which can be deferred, and which is approaching its deadline and must be started now. He also warns you about what not to do, which goals are fantasy, and which decisions plant hidden risks. |
 
 All three roles are driven by the same underlying knowledge graph: notes, goals, decisions, and schedules are interlinked through foreign keys (`topicId`, `noteIds`, `goalId`, `decisionIds`), forming a **traceable memory network**.
 
