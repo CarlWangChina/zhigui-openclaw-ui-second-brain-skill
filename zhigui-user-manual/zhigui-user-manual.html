@@ -198,12 +198,11 @@
   <h3>目录</h3>
   <ol>
     <li><a href="#ch1">产品概述</a></li>
-    <li><a href="#ch2">安装流程</a></li>
-    <li><a href="#ch3">配置 MCP 连接 AI 助手</a></li>
-    <li><a href="#ch4">UI 面板功能详解</a></li>
-    <li><a href="#ch5">核心智能特性</a></li>
-    <li><a href="#ch6">使用示例</a></li>
-    <li><a href="#ch7">常见问题</a></li>
+    <li><a href="#ch2">安装与配置</a></li>
+    <li><a href="#ch3">UI 面板功能详解</a></li>
+    <li><a href="#ch4">核心智能特性</a></li>
+    <li><a href="#ch5">使用示例</a></li>
+    <li><a href="#ch6">常见问题</a></li>
   </ol>
 </div>
 
@@ -280,25 +279,36 @@
          前端 UI (dashboard.js)</code></pre>
 </section>
 
-<!-- ===== Chapter 2: 安装流程 ===== -->
+<!-- ===== Chapter 2: 安装与配置 ===== -->
 <section class="chapter" id="ch2">
   <div class="chapter-num">第二章</div>
-  <h2 class="chapter-title">安装流程</h2>
+  <h2 class="chapter-title">安装与配置</h2>
+
+  <p>知归的安装遵循三步核心流程：<strong>下载解压 → 上传 Skill 到 AI 助手 → 配置 MCP</strong>。完成这三步后，AI 助手即可读写你的知识图谱。桌面面板为可选的附加功能。</p>
 
   <h3>2.1 前置条件</h3>
   <ul>
     <li><strong>Node.js ≥ 17</strong>：用于运行 MCP 引擎和 Electron 面板。下载地址：<code>https://nodejs.org</code></li>
-    <li><strong>Git</strong>（可选）：用于从 GitHub 克隆项目</li>
     <li><strong>支持 MCP 的 AI 工具</strong>：如 Trae、Cursor 等</li>
+    <li><strong>Git</strong>（可选）：用于从 GitHub 克隆项目</li>
   </ul>
 
-  <h3>2.2 方式一：下载 ZIP 直接使用（推荐）</h3>
+  <h3>2.2 第一步：下载并解压</h3>
 
   <div class="step">
     <div class="step-num">1</div>
     <div class="step-body">
-      <div class="step-title">下载并解压项目</div>
+      <div class="step-title">下载项目</div>
       <p>从 GitHub 下载 ZIP：<code>https://github.com/CarlWangChina/zhigui-openclaw-ui-second-brain-skill</code></p>
+      <p>或使用 Git 克隆：</p>
+      <pre><code>git clone https://github.com/CarlWangChina/zhigui-openclaw-ui-second-brain-skill.git</code></pre>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-body">
+      <div class="step-title">解压到目标目录</div>
       <p>解压到任意目录，例如 <code>D:\ZhiGui</code>。解压后目录结构：</p>
       <pre><code>D:\ZhiGui\
 ├── start.bat              ← Windows 一键启动脚本
@@ -309,75 +319,71 @@
 │   ├── electron\          ← Electron 桌面壳 (main.js + preload.js)
 │   ├── lib\               ← 配置与数据初始化
 │   ├── scripts\           ← 安装与种子脚本
-│   ├── test\              ← 15 个测试套件
+│   ├── test\              ← 测试套件
 │   ├── SKILL.md           ← AI 技能协议文档
 │   ├── config.json        ← 引擎配置
 │   ├── mcp-config-template.json  ← MCP 配置模板
 │   └── package.json       ← 依赖声明
+├── zhigui-user-manual\    ← 中文用户手册 (HTML + PDF)
+├── zhigui-user-manual-en\ ← 英文用户手册 (HTML + PDF)
 ├── package.json           ← Electron 依赖
 └── README.md</code></pre>
+    </div>
+  </div>
+
+  <h3>2.3 第二步：上传 Skill 到 AI 助手</h3>
+
+  <p>这一步将知归的技能协议（SKILL.md）安装到你的 AI 工具中，让 AI 知道如何使用知归的工具集。</p>
+
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-body">
+      <div class="step-title">找到 AI 工具的技能目录</div>
+      <p>不同 AI 工具的技能目录位置不同：</p>
+      <ul>
+        <li><strong>Trae</strong>：<code>%USERPROFILE%\.trae-cn\skills\</code></li>
+        <li><strong>其他支持技能目录的 AI 工具</strong>：参考各自文档</li>
+      </ul>
     </div>
   </div>
 
   <div class="step">
     <div class="step-num">2</div>
     <div class="step-body">
-      <div class="step-title">首次启动（自动安装依赖）</div>
-      <p>双击 <code>start.bat</code>（Windows）或运行 <code>./start.sh</code>（macOS/Linux）。</p>
-      <p>脚本会自动完成以下操作：</p>
-      <ul>
-        <li>检测并安装 Node.js 依赖（<code>npm install</code>）</li>
-        <li>下载 Electron 二进制文件</li>
-        <li>运行 setup.js 初始化数据目录和配置</li>
-        <li>注册全局 MCP 服务器</li>
-        <li>启动 Electron 桌面面板</li>
-      </ul>
-      <div class="callout callout-warn">
-        <div class="callout-title">首次运行注意</div>
-        <p>首次启动需要下载 Electron（约 100MB），请耐心等待。国内用户已配置 npmmirror 镜像加速。</p>
-      </div>
+      <div class="step-title">复制技能文件</div>
+      <p>将项目中的 <code>skill\</code> 目录内容复制到 AI 工具的技能目录下：</p>
+      <pre><code># 以 Trae 为例（PowerShell）
+Copy-Item -Path .\skill\* -Destination $env:USERPROFILE\.trae-cn\skills\zhigui\ -Recurse</code></pre>
+      <p>或者使用项目自带的 setup 脚本自动完成：</p>
+      <pre><code>node skill/scripts/setup.js &lt;项目目录&gt; &lt;技能目录&gt; &lt;node路径&gt;</code></pre>
     </div>
   </div>
 
   <div class="step">
     <div class="step-num">3</div>
     <div class="step-body">
-      <div class="step-title">验证安装成功</div>
-      <p>看到桌面右侧出现一个窄长的面板窗口，标题栏显示「ZhiGui · 知归」，即安装成功。</p>
-      <p>如果需要写入演示数据查看效果，在项目 <code>skill\</code> 目录下运行：</p>
-      <pre><code>node scripts/seed-demo-data.js</code></pre>
-      <p>这会创建 3 条示例笔记、2 个目标、1 个决策和 3 天日程，帮助快速了解系统功能。</p>
+      <div class="step-title">验证 Skill 已加载</div>
+      <p>在 AI 工具中开始新对话。如果 AI 能识别知归相关的指令（如「查看今日安排」），说明 Skill 已成功加载。</p>
+      <div class="callout">
+        <div class="callout-title">关于 SKILL.md</div>
+        <p><code>SKILL.md</code> 是 AI 的行为规范文档，定义了助手如何理解你的数据、何时调用哪些工具。你可以修改它来定制自己的助手性格和行为偏好，详见<a href="#ch4">第四章</a>。</p>
+      </div>
     </div>
   </div>
 
-  <h3>2.3 方式二：手动安装技能到 AI 工具</h3>
-  <p>如果你使用的 AI 工具支持「技能目录」（如 Trae 的 <code>~/.trae-cn/skills/</code>），可以将 <code>skill\</code> 目录内容复制过去：</p>
-  <pre><code># 以 Trae 为例
-copy /E /I skill\ %USERPROFILE%\.trae-cn\skills\zhigui\</code></pre>
-  <p>或者使用项目自带的 setup 脚本自动完成：</p>
-  <pre><code>node skill/scripts/setup.js &lt;项目目录&gt; &lt;技能目录&gt; &lt;node路径&gt;</code></pre>
+  <h3>2.4 第三步：配置 MCP</h3>
 
-  <h3>2.4 方式三：仅运行 Web 面板（无需 Electron）</h3>
-  <p>如果不想安装 Electron，可以仅运行 Web 服务器：</p>
-  <pre><code>cd skill
-node dashboard/server.js</code></pre>
-  <p>然后在浏览器打开 <code>http://localhost:7788</code> 即可使用面板。</p>
-</section>
-
-<!-- ===== Chapter 3: 配置 MCP ===== -->
-<section class="chapter" id="ch3">
-  <div class="chapter-num">第三章</div>
-  <h2 class="chapter-title">配置 MCP 连接 AI 助手</h2>
-
-  <p>MCP（Model Context Protocol）是 AI 助手调用 ZhiGui 工具的桥梁。配置后，AI 可以读写你的日程、笔记、目标等数据。</p>
-
-  <h3>3.1 在 Trae 中配置</h3>
+  <p>MCP（Model Context Protocol）是 AI 助手调用 ZhiGui 工具的桥梁。配置后，AI 可以读写你的日程、笔记、目标等数据。这三步完成后，系统即可正常工作。</p>
 
   <div class="step">
     <div class="step-num">1</div>
     <div class="step-body">
       <div class="step-title">打开 MCP 配置页面</div>
-      <p>在 Trae 中：设置 → MCP → Add → Manual Add</p>
+      <p>在 AI 工具中找到 MCP 配置入口：</p>
+      <ul>
+        <li><strong>Trae</strong>：设置 → MCP → Add → Manual Add</li>
+        <li><strong>Cursor / VS Code Copilot</strong>：参考各自 MCP 配置文档</li>
+      </ul>
     </div>
   </div>
 
@@ -385,7 +391,7 @@ node dashboard/server.js</code></pre>
     <div class="step-num">2</div>
     <div class="step-body">
       <div class="step-title">粘贴 MCP 配置</div>
-      <p>将以下 JSON 粘贴进去，替换 <code>&lt;skill_directory&gt;</code> 为你的实际路径：</p>
+      <p>将以下 JSON 粘贴进去，将路径替换为你的实际解压路径：</p>
       <pre><code>{
   "mcpServers": {
     "zhigui": {
@@ -394,6 +400,7 @@ node dashboard/server.js</code></pre>
     }
   }
 }</code></pre>
+      <p>也可参考项目根目录的 <code>mcp-config-template.json</code> 模板文件。</p>
     </div>
   </div>
 
@@ -401,12 +408,9 @@ node dashboard/server.js</code></pre>
     <div class="step-num">3</div>
     <div class="step-body">
       <div class="step-title">保存并验证</div>
-      <p>保存后，Trae 会自动连接 MCP 服务器。在对话中说「帮我查看今日安排」，如果 AI 调用了 <code>zhigui_get_assistant_bootstrap</code> 工具并返回数据，说明配置成功。</p>
+      <p>保存后，AI 工具会自动连接 MCP 服务器。在对话中说「帮我查看今日安排」，如果 AI 调用了 <code>zhigui_get_assistant_bootstrap</code> 工具并返回数据，说明配置成功。</p>
     </div>
   </div>
-
-  <h3>3.2 在其他 AI 工具中配置</h3>
-  <p>任何支持 MCP 的 AI 工具（Cursor、VS Code Copilot 等）都可以使用相同的配置。参考项目根目录的 <code>mcp-config-template.json</code> 模板文件。</p>
 
   <div class="callout">
     <div class="callout-title">配置提示</div>
@@ -419,7 +423,53 @@ node dashboard/server.js</code></pre>
     </ul>
   </div>
 
-  <h3>3.3 配置文件说明</h3>
+  <h3>2.5 可选：启动桌面面板</h3>
+
+  <p>桌面面板是知归的可视化操作界面，提供日程、目标、笔记和待办的可视化编辑。面板是可选的 — MCP 配置完成后，AI 已经可以正常读写数据，但面板能让你直接查看和操作。</p>
+
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-body">
+      <div class="step-title">首次启动（自动安装依赖）</div>
+      <p>双击 <code>start.bat</code>（Windows）或运行 <code>./start.sh</code>（macOS/Linux）。</p>
+      <p>脚本会自动完成以下操作：</p>
+      <ul>
+        <li>检测并安装 Node.js 依赖（<code>npm install</code>）</li>
+        <li>下载 Electron 二进制文件</li>
+        <li>运行 setup.js 初始化数据目录和配置</li>
+        <li>启动 Electron 桌面面板</li>
+      </ul>
+      <div class="callout callout-warn">
+        <div class="callout-title">首次运行注意</div>
+        <p>首次启动需要下载 Electron（约 100MB），请耐心等待。国内用户已配置 npmmirror 镜像加速。</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-body">
+      <div class="step-title">验证安装成功</div>
+      <p>看到桌面右侧出现一个窄长的面板窗口，标题栏显示「ZhiGui · 知归」，即安装成功。</p>
+      <p>如果需要写入演示数据查看效果，在项目 <code>skill\</code> 目录下运行：</p>
+      <pre><code>node scripts/seed-demo-data.js        # 中文演示数据
+node scripts/seed-demo-data-en.js    # 英文演示数据</code></pre>
+      <p>这会创建 3 条示例笔记、2 个目标、1 个决策和 3 天日程，帮助快速了解系统功能。</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">3</div>
+    <div class="step-body">
+      <div class="step-title">仅运行 Web 面板（无需 Electron）</div>
+      <p>如果不想安装 Electron，可以仅运行 Web 服务器：</p>
+      <pre><code>cd skill
+node dashboard/server.js</code></pre>
+      <p>然后在浏览器打开 <code>http://localhost:7788</code> 即可使用面板。</p>
+    </div>
+  </div>
+
+  <h3>2.6 配置文件说明</h3>
   <p><code>config.json</code> 位于技能目录下，控制引擎的数据目录指向：</p>
   <div class="table-wrap">
     <table>
@@ -431,9 +481,9 @@ node dashboard/server.js</code></pre>
   </div>
 </section>
 
-<!-- ===== Chapter 4: UI 面板功能详解 ===== -->
-<section class="chapter" id="ch4">
-  <div class="chapter-num">第四章</div>
+<!-- ===== Chapter 3: UI 面板功能详解 ===== -->
+<section class="chapter" id="ch3">
+  <div class="chapter-num">第三章</div>
   <h2 class="chapter-title">UI 面板功能详解</h2>
 
   <p>面板有两种形态：<strong>展开态</strong>（全功能面板，常驻屏幕右侧）和<strong>收起态</strong>（右下角小图标，点击恢复展开）。</p>
@@ -570,8 +620,8 @@ node dashboard/server.js</code></pre>
 </section>
 
 <!-- ===== Chapter 5: 核心智能特性 ===== -->
-<section class="chapter" id="ch5">
-  <div class="chapter-num">第五章</div>
+<section class="chapter" id="ch4">
+  <div class="chapter-num">第四章</div>
   <h2 class="chapter-title">核心智能特性</h2>
 
   <p>知归区别于普通待办工具的核心，在于四层智能设计：自动关联、分层索引、长期记忆、以及可定制的技能协议。</p>
@@ -693,8 +743,8 @@ description: 考研备考督导助手。当用户讨论学习计划、复习进�
 </section>
 
 <!-- ===== Chapter 6: 使用示例 ===== -->
-<section class="chapter" id="ch6">
-  <div class="chapter-num">第六章</div>
+<section class="chapter" id="ch5">
+  <div class="chapter-num">第五章</div>
   <h2 class="chapter-title">使用示例</h2>
 
   <h3>6.1 演示数据概览</h3>
@@ -819,8 +869,8 @@ AI：我注意到你明天 15:00 有团队周会，
 </section>
 
 <!-- ===== Chapter 7: 常见问题 ===== -->
-<section class="chapter" id="ch7">
-  <div class="chapter-num">第七章</div>
+<section class="chapter" id="ch6">
+  <div class="chapter-num">第六章</div>
   <h2 class="chapter-title">常见问题</h2>
 
   <div class="callout">

@@ -198,12 +198,11 @@
   <h3>Table of Contents</h3>
   <ol>
     <li><a href="#ch1">Product Overview</a></li>
-    <li><a href="#ch2">Installation</a></li>
-    <li><a href="#ch3">Configuring MCP to Connect AI Assistants</a></li>
-    <li><a href="#ch4">UI Panel Feature Guide</a></li>
-    <li><a href="#ch5">Core Intelligent Features</a></li>
-    <li><a href="#ch6">Usage Examples</a></li>
-    <li><a href="#ch7">FAQ</a></li>
+    <li><a href="#ch2">Installation & Configuration</a></li>
+    <li><a href="#ch3">UI Panel Feature Guide</a></li>
+    <li><a href="#ch4">Core Intelligent Features</a></li>
+    <li><a href="#ch5">Usage Examples</a></li>
+    <li><a href="#ch6">FAQ</a></li>
   </ol>
 </div>
 
@@ -280,25 +279,36 @@
          Frontend UI (dashboard.js)</code></pre>
 </section>
 
-<!-- ===== Chapter 2: Installation ===== -->
+<!-- ===== Chapter 2: Installation & Configuration ===== -->
 <section class="chapter" id="ch2">
   <div class="chapter-num">Chapter 2</div>
-  <h2 class="chapter-title">Installation</h2>
+  <h2 class="chapter-title">Installation & Configuration</h2>
+
+  <p>ZhiGui's setup follows a three-step core flow: <strong>Download & Extract &rarr; Upload Skill to AI Agent &rarr; Configure MCP</strong>. After completing these three steps, your AI assistant can read and write your knowledge graph. The desktop panel is an optional add-on.</p>
 
   <h3>2.1 Prerequisites</h3>
   <ul>
     <li><strong>Node.js &ge; 17</strong>: Required to run the MCP engine and Electron panel. Download at <code>https://nodejs.org</code></li>
-    <li><strong>Git</strong> (optional): For cloning the project from GitHub</li>
     <li><strong>An MCP-capable AI tool</strong>: Such as Trae, Cursor, etc.</li>
+    <li><strong>Git</strong> (optional): For cloning the project from GitHub</li>
   </ul>
 
-  <h3>2.2 Option 1: Download ZIP for Direct Use (Recommended)</h3>
+  <h3>2.2 Step 1: Download & Extract</h3>
 
   <div class="step">
     <div class="step-num">1</div>
     <div class="step-body">
-      <div class="step-title">Download and Extract the Project</div>
+      <div class="step-title">Download the Project</div>
       <p>Download the ZIP from GitHub: <code>https://github.com/CarlWangChina/zhigui-openclaw-ui-second-brain-skill</code></p>
+      <p>Or clone with Git:</p>
+      <pre><code>git clone https://github.com/CarlWangChina/zhigui-openclaw-ui-second-brain-skill.git</code></pre>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-body">
+      <div class="step-title">Extract to Target Directory</div>
       <p>Extract to any directory, for example <code>D:\ZhiGui</code>. The extracted directory structure:</p>
       <pre><code>D:\ZhiGui\
 ├── start.bat              &larr; Windows one-click launch script
@@ -309,18 +319,116 @@
 │   ├── electron\          &larr; Electron desktop shell (main.js + preload.js)
 │   ├── lib\               &larr; Configuration & data initialization
 │   ├── scripts\           &larr; Install & seed scripts
-│   ├── test\              &larr; 15 test suites
+│   ├── test\              &larr; Test suites
 │   ├── SKILL.md           &larr; AI skill protocol document
 │   ├── config.json        &larr; Engine configuration
 │   ├── mcp-config-template.json  &larr; MCP config template
 │   └── package.json       &larr; Dependency declaration
+├── zhigui-user-manual\    &larr; Chinese user manual (HTML + PDF)
+├── zhigui-user-manual-en\ &larr; English user manual (HTML + PDF)
 ├── package.json           &larr; Electron dependencies
 └── README.md</code></pre>
     </div>
   </div>
 
+  <h3>2.3 Step 2: Upload Skill to Your AI Agent</h3>
+
+  <p>This step installs ZhiGui's skill protocol (SKILL.md) into your AI tool, so the AI knows how to use ZhiGui's toolset.</p>
+
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-body">
+      <div class="step-title">Locate Your AI Tool's Skill Directory</div>
+      <p>Different AI tools have different skill directory locations:</p>
+      <ul>
+        <li><strong>Trae</strong>: <code>%USERPROFILE%\.trae-cn\skills\</code></li>
+        <li><strong>Other AI tools with skill directory support</strong>: Refer to their respective documentation</li>
+      </ul>
+    </div>
+  </div>
+
   <div class="step">
     <div class="step-num">2</div>
+    <div class="step-body">
+      <div class="step-title">Copy the Skill Files</div>
+      <p>Copy the contents of the project's <code>skill\</code> directory to your AI tool's skill directory:</p>
+      <pre><code># Using Trae as an example (PowerShell)
+Copy-Item -Path .\skill\* -Destination $env:USERPROFILE\.trae-cn\skills\zhigui\ -Recurse</code></pre>
+      <p>Or use the project's built-in setup script to do it automatically:</p>
+      <pre><code>node skill/scripts/setup.js &lt;project_directory&gt; &lt;skill_directory&gt; &lt;node_path&gt;</code></pre>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">3</div>
+    <div class="step-body">
+      <div class="step-title">Verify the Skill is Loaded</div>
+      <p>Start a new conversation in your AI tool. If the AI can recognize ZhiGui-related commands (e.g., "Show me today's schedule"), the skill has been successfully loaded.</p>
+      <div class="callout">
+        <div class="callout-title">About SKILL.md</div>
+        <p><code>SKILL.md</code> is the AI's behavioral specification document, defining how the assistant understands your data and when to call which tools. You can modify it to customize your own assistant personality and behavioral preferences — see <a href="#ch4">Chapter 4</a> for details.</p>
+      </div>
+    </div>
+  </div>
+
+  <h3>2.4 Step 3: Configure MCP</h3>
+
+  <p>MCP (Model Context Protocol) is the bridge through which AI assistants invoke ZhiGui tools. Once configured, the AI can read and write your schedules, notes, goals, and other data. After these three steps, the system is fully operational.</p>
+
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-body">
+      <div class="step-title">Open the MCP Configuration Page</div>
+      <p>Find the MCP configuration entry in your AI tool:</p>
+      <ul>
+        <li><strong>Trae</strong>: Settings &rarr; MCP &rarr; Add &rarr; Manual Add</li>
+        <li><strong>Cursor / VS Code Copilot</strong>: Refer to their respective MCP configuration docs</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-body">
+      <div class="step-title">Paste the MCP Configuration</div>
+      <p>Paste the following JSON, replacing the path with your actual extracted path:</p>
+      <pre><code>{
+  "mcpServers": {
+    "zhigui": {
+      "command": "node",
+      "args": ["D:/ZhiGui/skill/engine/server.js"]
+    }
+  }
+}</code></pre>
+      <p>You can also refer to the <code>mcp-config-template.json</code> template file in the project root directory.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">3</div>
+    <div class="step-body">
+      <div class="step-title">Save and Verify</div>
+      <p>After saving, the AI tool will automatically connect to the MCP server. In a conversation, say "Show me today's schedule". If the AI calls the <code>zhigui_get_assistant_bootstrap</code> tool and returns data, the configuration is successful.</p>
+    </div>
+  </div>
+
+  <div class="callout">
+    <div class="callout-title">Configuration Tips</div>
+    <ul style="margin-bottom:0">
+      <li>If <code>node</code> is not in PATH, use the full path: <code>"C:/Program Files/nodejs/node.exe"</code></li>
+      <li>Paths in JSON should use forward slashes <code>/</code> to avoid backslash escaping issues</li>
+      <li>No env variables need to be set &mdash; the engine auto-detects the data directory</li>
+      <li>The web panel (port 7788) does not need to be running for MCP to work</li>
+      <li>The MCP server reads and writes JSON files directly; the panel auto-refreshes via fs.watch</li>
+    </ul>
+  </div>
+
+  <h3>2.5 Optional: Launch the Desktop Panel</h3>
+
+  <p>The desktop panel is ZhiGui's visual interface for editing schedules, goals, notes, and to-dos. The panel is optional &mdash; once MCP is configured, the AI can already read and write data, but the panel lets you view and manipulate things directly.</p>
+
+  <div class="step">
+    <div class="step-num">1</div>
     <div class="step-body">
       <div class="step-title">First Launch (Auto-installs Dependencies)</div>
       <p>Double-click <code>start.bat</code> (Windows) or run <code>./start.sh</code> (macOS/Linux).</p>
@@ -329,7 +437,6 @@
         <li>Detect and install Node.js dependencies (<code>npm install</code>)</li>
         <li>Download the Electron binary</li>
         <li>Run setup.js to initialize the data directory and configuration</li>
-        <li>Register the global MCP server</li>
         <li>Launch the Electron desktop panel</li>
       </ul>
       <div class="callout callout-warn">
@@ -340,86 +447,29 @@
   </div>
 
   <div class="step">
-    <div class="step-num">3</div>
+    <div class="step-num">2</div>
     <div class="step-body">
       <div class="step-title">Verify Successful Installation</div>
       <p>When a narrow panel window appears on the right side of your desktop with the title bar showing "ZhiGui", the installation is successful.</p>
       <p>If you want to load demo data to see it in action, run the following in the project's <code>skill\</code> directory:</p>
-      <pre><code>node scripts/seed-demo-data.js</code></pre>
+      <pre><code>node scripts/seed-demo-data.js        # Chinese demo data
+node scripts/seed-demo-data-en.js    # English demo data</code></pre>
       <p>This creates 3 sample notes, 2 goals, 1 decision, and a 3-day schedule to help you quickly understand the system's features.</p>
-    </div>
-  </div>
-
-  <h3>2.3 Option 2: Manually Install the Skill into an AI Tool</h3>
-  <p>If your AI tool supports a "skill directory" (such as Trae's <code>~/.trae-cn/skills/</code>), you can copy the contents of the <code>skill\</code> directory there:</p>
-  <pre><code># Using Trae as an example
-copy /E /I skill\ %USERPROFILE%\.trae-cn\skills\zhigui\</code></pre>
-  <p>Or use the project's built-in setup script to do it automatically:</p>
-  <pre><code>node skill/scripts/setup.js &lt;project_directory&gt; &lt;skill_directory&gt; &lt;node_path&gt;</code></pre>
-
-  <h3>2.4 Option 3: Run the Web Panel Only (Without Electron)</h3>
-  <p>If you don't want to install Electron, you can run just the web server:</p>
-  <pre><code>cd skill
-node dashboard/server.js</code></pre>
-  <p>Then open <code>http://localhost:7788</code> in your browser to use the panel.</p>
-</section>
-
-<!-- ===== Chapter 3: Configuring MCP ===== -->
-<section class="chapter" id="ch3">
-  <div class="chapter-num">Chapter 3</div>
-  <h2 class="chapter-title">Configuring MCP to Connect AI Assistants</h2>
-
-  <p>MCP (Model Context Protocol) is the bridge through which AI assistants invoke ZhiGui tools. Once configured, the AI can read and write your schedules, notes, goals, and other data.</p>
-
-  <h3>3.1 Configure in Trae</h3>
-
-  <div class="step">
-    <div class="step-num">1</div>
-    <div class="step-body">
-      <div class="step-title">Open the MCP Configuration Page</div>
-      <p>In Trae: Settings &rarr; MCP &rarr; Add &rarr; Manual Add</p>
-    </div>
-  </div>
-
-  <div class="step">
-    <div class="step-num">2</div>
-    <div class="step-body">
-      <div class="step-title">Paste the MCP Configuration</div>
-      <p>Paste the following JSON, replacing <code>&lt;skill_directory&gt;</code> with your actual path:</p>
-      <pre><code>{
-  "mcpServers": {
-    "zhigui": {
-      "command": "node",
-      "args": ["D:/ZhiGui/skill/engine/server.js"]
-    }
-  }
-}</code></pre>
     </div>
   </div>
 
   <div class="step">
     <div class="step-num">3</div>
     <div class="step-body">
-      <div class="step-title">Save and Verify</div>
-      <p>After saving, Trae will automatically connect to the MCP server. In a conversation, say "Help me check today's schedule". If the AI calls the <code>zhigui_get_assistant_bootstrap</code> tool and returns data, the configuration is successful.</p>
+      <div class="step-title">Run the Web Panel Only (Without Electron)</div>
+      <p>If you don't want to install Electron, you can run just the web server:</p>
+      <pre><code>cd skill
+node dashboard/server.js</code></pre>
+      <p>Then open <code>http://localhost:7788</code> in your browser to use the panel.</p>
     </div>
   </div>
 
-  <h3>3.2 Configure in Other AI Tools</h3>
-  <p>Any MCP-capable AI tool (Cursor, VS Code Copilot, etc.) can use the same configuration. Refer to the <code>mcp-config-template.json</code> template file in the project root directory.</p>
-
-  <div class="callout">
-    <div class="callout-title">Configuration Tips</div>
-    <ul style="margin-bottom:0">
-      <li>If <code>node</code> is not in PATH, use the full path: <code>"C:/Program Files/nodejs/node.exe"</code></li>
-      <li>Paths in JSON should use forward slashes <code>/</code> to avoid backslash escaping issues</li>
-      <li>No env variables need to be set — the engine auto-detects the data directory</li>
-      <li>The web panel (port 7788) does not need to be running for MCP to work</li>
-      <li>The MCP server reads and writes JSON files directly; the panel auto-refreshes via fs.watch</li>
-    </ul>
-  </div>
-
-  <h3>3.3 Configuration File Reference</h3>
+  <h3>2.6 Configuration File Reference</h3>
   <p><code>config.json</code> is located in the skill directory and controls where the engine points its data directory:</p>
   <div class="table-wrap">
     <table>
@@ -431,9 +481,9 @@ node dashboard/server.js</code></pre>
   </div>
 </section>
 
-<!-- ===== Chapter 4: UI Panel Feature Guide ===== -->
-<section class="chapter" id="ch4">
-  <div class="chapter-num">Chapter 4</div>
+<!-- ===== Chapter 3: UI Panel Feature Guide ===== -->
+<section class="chapter" id="ch3">
+  <div class="chapter-num">Chapter 3</div>
   <h2 class="chapter-title">UI Panel Feature Guide</h2>
 
   <p>The panel has two forms: <strong>expanded mode</strong> (full-feature panel, docked to the right edge of the screen) and <strong>collapsed mode</strong> (a small icon in the bottom-right corner; click to restore expanded mode).</p>
@@ -569,9 +619,9 @@ node dashboard/server.js</code></pre>
   <p>After clicking the collapse button, the panel shrinks into a small circular icon in the bottom-right corner (showing "ZhiGui"). Click the icon to restore the expanded panel. Window position and always-on-top state are persisted.</p>
 </section>
 
-<!-- ===== Chapter 5: Core Intelligent Features ===== -->
-<section class="chapter" id="ch5">
-  <div class="chapter-num">Chapter 5</div>
+<!-- ===== Chapter 4: Core Intelligent Features ===== -->
+<section class="chapter" id="ch4">
+  <div class="chapter-num">Chapter 4</div>
   <h2 class="chapter-title">Core Intelligent Features</h2>
 
   <p>What sets ZhiGui apart from ordinary to-do tools is a four-layer intelligent design: proactive linking, layered indexing, long-term memory, and a customizable skill protocol.</p>
@@ -694,9 +744,9 @@ You are a study advisor. Role positioning:
   </div>
 </section>
 
-<!-- ===== Chapter 6: Usage Examples ===== -->
-<section class="chapter" id="ch6">
-  <div class="chapter-num">Chapter 6</div>
+<!-- ===== Chapter 5: Usage Examples ===== -->
+<section class="chapter" id="ch5">
+  <div class="chapter-num">Chapter 5</div>
   <h2 class="chapter-title">Usage Examples</h2>
 
   <h3>6.1 Demo Data Overview</h3>
@@ -826,9 +876,9 @@ AI: I noticed you have a team weekly meeting tomorrow at 15:00.
   </div>
 </section>
 
-<!-- ===== Chapter 7: FAQ ===== -->
-<section class="chapter" id="ch7">
-  <div class="chapter-num">Chapter 7</div>
+<!-- ===== Chapter 6: FAQ ===== -->
+<section class="chapter" id="ch6">
+  <div class="chapter-num">Chapter 6</div>
   <h2 class="chapter-title">FAQ</h2>
 
   <div class="callout">
