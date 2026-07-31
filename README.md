@@ -10,7 +10,7 @@
 
 ZhiGui (知归, meaning "knowing where to return") is not another to-do list app. It is a **personal intelligence system** that combines a JSON-file-driven knowledge graph with a desktop visualization panel, connected to any MCP-capable AI assistant.
 
-It does not run in the background, push notifications, or make decisions for you. Instead, every time you start a conversation with your AI assistant, ZhiGui loads a compact Bootstrap index of your entire context — goals, schedules, notes, decisions, relationships — and uses it to give you precise, context-aware advice.
+It does not run in the background or push notifications. Instead, every time you start a conversation with your AI assistant, ZhiGui loads a compact Bootstrap index of your entire context — goals, schedules, notes, decisions, relationships — and uses it to provide decision-making and planning advice: what to prioritize, what can be deferred, what is approaching its deadline, and which actions offer the best return on effort.
 
 ### Three Roles, One Brain
 
@@ -43,7 +43,7 @@ All three roles are driven by the same underlying knowledge graph: notes, goals,
 ### Prerequisites
 
 - **Node.js ≥ 17** — Download from [https://nodejs.org](https://nodejs.org)
-- **An MCP-capable AI tool** — Such as [Trae](https://www.trae.ai/), Cursor, etc.
+- **An MCP-capable AI tool** — Such as [Trae](https://www.trae.ai/), [Claude Desktop](https://claude.ai/), [Cursor](https://cursor.sh/), [Codex](https://openai.com/codex/), [OpenClaw](https://github.com/anthropics/openclaw), [VS Code Copilot](https://code.visualstudio.com/docs/editor/artificial-intelligence), etc.
 
 ### Step 1: Download & Extract
 
@@ -157,7 +157,7 @@ The panel lets you directly view and manipulate data. MCP lets the AI read, reas
 ## System Architecture
 
 ```text
-User ←→ AI Assistant (Trae / Cursor / etc.)
+User ←→ AI Assistant (Trae / Claude Desktop / Cursor / Codex / OpenClaw / etc.)
               ↕ MCP Protocol
          ZhiGui Engine (server.js)
               ↕ JSON File Read/Write
@@ -204,6 +204,13 @@ Deletion is irreversible — both the panel and AI preview the impact first, wai
 ## Feedback
 
 Found a bug or have a suggestion? Email: **huangkkkke16@gmail.com**
+
+## Acknowledgments
+
+This project would not have been possible without the contributions of the following people:
+
+- **Zihao Wang** — Project advisor. Provided invaluable guidance and recommendations throughout the project's lifecycle, shaping the core design philosophy, product direction, and architectural decisions. His mentorship was instrumental in bridging the gap between concept and a working system.
+- **Kewei Huang** ([Huangkkkke16](mailto:huangkkkke16@gmail.com)) — Project designer, developer, and tester. Responsible for the full-stack design and implementation of the system — from the MCP engine and knowledge graph architecture to the Electron desktop panel and AI skill protocol. Conducted all testing, debugging, and iterative refinement based on real-world usage.
 
 ## License
 

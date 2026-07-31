@@ -10,7 +10,7 @@
 
 知归（ZhiGui）不是又一个待办清单应用。它是一个**个人智能系统**，将 JSON 文件驱动的知识图谱与桌面可视化面板结合，通过 MCP 协议连接到任何支持 MCP 的 AI 助手。
 
-它不在后台运行、不推送通知、不替你做决定。相反，每次你与 AI 助手开始对话时，知归会加载一个紧凑的 Bootstrap 索引 — 包含你的全部目标、日程、笔记、决策和关系 — 据此给出精准的、有上下文感知的建议。
+它不在后台运行、不推送通知。相反，每次你与 AI 助手开始对话时，知归会加载一个紧凑的 Bootstrap 索引 — 包含你的全部目标、日程、笔记、决策和关系 — 据此提供决策和规划建议：哪些事该优先做、哪些可以缓一缓、哪些快临期了必须动工、哪些行动的性价比最高。
 
 ### 三种角色，同一大脑
 
@@ -43,7 +43,7 @@
 ### 前置条件
 
 - **Node.js ≥ 17** — 下载地址：[https://nodejs.org](https://nodejs.org)
-- **支持 MCP 的 AI 工具** — 如 [Trae](https://www.trae.ai/)、Cursor 等
+- **支持 MCP 的 AI 工具** — 如 [Trae](https://www.trae.ai/)、[Claude Desktop](https://claude.ai/)、[Cursor](https://cursor.sh/)、[Codex](https://openai.com/codex/)、[OpenClaw](https://github.com/anthropics/openclaw)、[VS Code Copilot](https://code.visualstudio.com/docs/editor/artificial-intelligence) 等
 
 ### 第一步：下载并解压
 
@@ -157,7 +157,7 @@ node scripts/seed-demo-data-en.js    # 英文演示数据
 ## 系统架构
 
 ```text
-用户 ←→ AI 助手 (Trae / Cursor 等)
+用户 ←→ AI 助手 (Trae / Claude Desktop / Cursor / Codex / OpenClaw 等)
               ↕ MCP 协议
          ZhiGui 引擎 (server.js)
               ↕ JSON 文件读写
@@ -204,6 +204,13 @@ npm.cmd test
 ## 反馈
 
 发现问题或有建议？邮箱：**huangkkkke16@gmail.com**
+
+## 致谢
+
+本项目的完成离不开以下人员的贡献：
+
+- **Zihao Wang** — 项目指导老师。在整个项目周期中提供了大量宝贵的指导与建议，在核心设计理念、产品方向和架构决策上给予了关键性指引。他的 mentorship 帮助项目从概念落地为可运行的系统，弥合了想法与实现之间的鸿沟。
+- **Kewei Huang**（[Huangkkkke16](mailto:huangkkkke16@gmail.com)）— 项目设计、开发与测试。负责系统的全栈设计与实现 — 从 MCP 引擎和知识图谱架构，到 Electron 桌面面板和 AI 技能协议。完成全部测试、调试，并基于真实使用场景进行迭代优化。
 
 ## 许可
 
