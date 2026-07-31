@@ -1,4 +1,4 @@
-# ZhiGui 知归
+# ZhiGui 知归 (只龟）
 
 **A conversation-awakened personal assistant system — your Second Brain as an MCP Skill.**
 
