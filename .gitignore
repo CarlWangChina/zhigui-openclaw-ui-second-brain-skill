@@ -11,6 +11,7 @@ skill/.zhigui/
 .cursor/
 .mcp.json
 .workbuddy/
+.trae-html-share-packages/
 
 # === Backups ===
 backups/
