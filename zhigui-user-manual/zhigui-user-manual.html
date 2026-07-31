@@ -511,14 +511,14 @@ node dashboard/server.js</code></pre>
 
   <h3>4.3 今日视图功能区块</h3>
 
-  <figure class="screenshot">
-    <img src="assets/today-view.png" alt="今日视图完整界面">
-    <figcaption>图 1：今日视图 — 显示概览、晨报、日程安排与待办事项</figcaption>
-  </figure>
-
   <h4>今日概览（Hero 区）</h4>
   <p>顶部大字区域，显示当日日期、任务总数、进行中目标数、今日完成进度百分比，以及注意力信号徽章（如「2 个逾期 · 1 个阻塞」）。</p>
   <p>提供两个快捷按钮：<strong>加入日程</strong>（打开事件添加弹窗）和<strong>添加事项</strong>（打开待办添加弹窗）。</p>
+
+  <figure class="screenshot">
+    <img src="assets/today-overview.png" alt="今日概览与晨报">
+    <figcaption>图 1：今日视图概览 — 顶部指标、日期、完成进度与晨报区块</figcaption>
+  </figure>
 
   <h4>晨报区（Decision Check）</h4>
   <p>AI 在每日首次对话时生成的决策简报，包含 5 个固定区块：</p>
@@ -546,6 +546,18 @@ node dashboard/server.js</code></pre>
   </ul>
   <p>日程区顶部有日期导航：<strong>‹</strong> 前一天、<strong>›</strong> 后一天、<strong>日历图标</strong> 打开月历选择日期。</p>
 
+  <figure class="screenshot">
+    <img src="assets/today-schedule.png" alt="今日行程列表">
+    <figcaption>图 2：今日行程列表 — 任务卡片显示时间、标题与关联笔记</figcaption>
+  </figure>
+
+  <p>点击任务卡片中的关联笔记，可展开查看完整的关联上下文，包括关联目标、主题、关联原因以及相关笔记和决策信息：</p>
+
+  <figure class="screenshot">
+    <img src="assets/schedule-context.png" alt="行程展开关联笔记">
+    <figcaption>图 3：行程展开关联笔记 — 显示关联目标、主题、关联原因及笔记与决策信息</figcaption>
+  </figure>
+
   <h4>待办事项区（Errands）</h4>
   <p>未安排日期的待办事项队列。每张卡片显示标题、优先级（must/should/nice）、关联笔记。点击可编辑或完成。</p>
 
@@ -555,11 +567,16 @@ node dashboard/server.js</code></pre>
   <h4>每日复盘区（Reflection）</h4>
   <p>AI 在每日最后一次对话时生成的复盘报告，包含：完成事项总结、目标健康度检查、注意力变化、生命周期管理建议。</p>
 
+  <figure class="screenshot">
+    <img src="assets/today-errands.png" alt="待办事项、已完成与每日反思">
+    <figcaption>图 4：今日视图底部 — 待办事项、已完成事项与每日反思</figcaption>
+  </figure>
+
   <h3>4.4 知识库视图</h3>
 
   <figure class="screenshot">
     <img src="assets/knowledge-view.png" alt="知识库视图界面">
-    <figcaption>图 2：知识库视图 — 主题列表、分类筛选与全文搜索</figcaption>
+    <figcaption>图 5：知识库视图 — 主题库分类与全文搜索</figcaption>
   </figure>
 
   <h4>主题库（Topic Library）</h4>
@@ -571,11 +588,6 @@ node dashboard/server.js</code></pre>
   <p>提供「记录笔记」按钮，可直接在面板中手动录入笔记。文件类导入请通过聊天附件交给 AI 处理。</p>
 
   <h3>4.5 全部视图</h3>
-
-  <figure class="screenshot">
-    <img src="assets/all-view.png" alt="全部视图界面">
-    <figcaption>图 3：全部视图 — 目标、约束、决策记录与笔记</figcaption>
-  </figure>
 
   <h4>目标区（Goals）</h4>
   <p>展示战略目标和当前目标。每张目标卡片可展开查看关联任务、关联笔记和决策记录。</p>
@@ -594,16 +606,65 @@ node dashboard/server.js</code></pre>
     </div>
   </div>
 
+  <figure class="screenshot">
+    <img src="assets/all-goals.png" alt="全部视图目标与约束">
+    <figcaption>图 6：全部视图 — 战略目标、当前目标与长期约束</figcaption>
+  </figure>
+
   <h4>约束区（Constraints）</h4>
   <p>长期约束条件，如「23 点前睡觉保护视力」。约束会影响 AI 的日程安排建议。</p>
 
   <h4>决策区（Decisions）</h4>
   <p>结构化决策记录，包含标题、依据、影响和关联实体。决策有 5 种状态：待定、已采纳、已拒绝、已过期、已替代。</p>
 
-  <h3>4.6 收起态</h3>
   <figure class="screenshot">
-    <img src="assets/mini-view.png" alt="收起态小图标" style="max-width: 400px;">
-    <figcaption>图 4：收起态 — 右下角圆形「知归」小图标，点击恢复展开</figcaption>
+    <img src="assets/all-decisions.png" alt="决策记录列表">
+    <figcaption>图 7：全部视图 — 决策记录列表</figcaption>
+  </figure>
+
+  <h4>笔记区（Notes）</h4>
+  <p>所有笔记以列表形式展示，带有主题标签便于筛选与检索。</p>
+
+  <figure class="screenshot">
+    <img src="assets/all-notes.png" alt="全部视图笔记列表">
+    <figcaption>图 8：全部视图 — 笔记列表与主题标签</figcaption>
+  </figure>
+
+  <p>点击笔记卡片可展开查看完整正文内容：</p>
+
+  <figure class="screenshot">
+    <img src="assets/note-opened.png" alt="笔记展开内容">
+    <figcaption>图 9：笔记展开 — 显示完整正文内容</figcaption>
+  </figure>
+
+  <h3>4.6 弹窗操作</h3>
+  <p>面板提供三个快捷弹窗，用于快速添加笔记、日程和待办事项。可通过顶部工具栏的「加入日程」「添加事项」按钮，或各视图中的「记录笔记」按钮触发。</p>
+
+  <h4>添加笔记弹窗</h4>
+  <p>用于手动录入笔记，填写标题、主题分类和正文内容。</p>
+  <figure class="screenshot">
+    <img src="assets/add-note-modal.png" alt="添加笔记弹窗">
+    <figcaption>图 10：添加笔记弹窗 — 录入标题、主题与正文</figcaption>
+  </figure>
+
+  <h4>添加日程弹窗</h4>
+  <p>用于创建日程事件，填写日期、时间、标题、时长与关联信息。</p>
+  <figure class="screenshot">
+    <img src="assets/add-event-modal.png" alt="添加日程弹窗">
+    <figcaption>图 11：添加日程弹窗 — 录入日期、时间与标题</figcaption>
+  </figure>
+
+  <h4>添加待办弹窗</h4>
+  <p>用于创建待办事项，填写标题、优先级与关联笔记。</p>
+  <figure class="screenshot">
+    <img src="assets/add-errand-modal.png" alt="添加待办弹窗">
+    <figcaption>图 12：添加待办弹窗 — 录入标题、优先级与关联</figcaption>
+  </figure>
+
+  <h3>4.7 收起态</h3>
+  <figure class="screenshot">
+    <img src="assets/collapsed.png" alt="收起态小图标" style="max-width: 400px;">
+    <figcaption>图 13：收起态 — 圆形「知归」小图标，点击恢复展开</figcaption>
   </figure>
   <p>点击收起按钮后，面板缩小为右下角的圆形小图标（显示「知归」二字）。点击图标恢复展开。窗口位置和置顶状态会持久化保存。</p>
 </section>
