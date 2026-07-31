@@ -78,18 +78,7 @@ ZhiGui/
 
 ### Step 2: Upload Skill to Your AI Agent
 
-If your AI tool supports a "skill directory" (e.g., Trae's `~/.trae-cn/skills/`), copy the `skill/` directory contents there:
-
-```powershell
-# Using Trae as an example
-Copy-Item -Path .\skill\* -Destination $env:USERPROFILE\.trae-cn\skills\zhigui\ -Recurse
-```
-
-Or use the built-in setup script to do it automatically:
-
-```powershell
-node skill/scripts/setup.js <project_directory> <skill_directory> <node_path>
-```
+Mainstream AI tools (such as Trae, Cursor, Claude Desktop, etc.) support uploading Skills via their settings page. Upload the project's `skill/` directory or the `SKILL.md` file within it.
 
 ### Step 3: Configure MCP
 

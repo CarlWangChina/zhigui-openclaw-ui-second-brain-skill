@@ -78,18 +78,7 @@ ZhiGui/
 
 ### 第二步：上传 Skill 到 AI 助手
 
-如果你使用的 AI 工具支持「技能目录」（如 Trae 的 `~/.trae-cn/skills/`），将 `skill/` 目录内容复制过去：
-
-```powershell
-# 以 Trae 为例
-Copy-Item -Path .\skill\* -Destination $env:USERPROFILE\.trae-cn\skills\zhigui\ -Recurse
-```
-
-或者使用项目自带的 setup 脚本自动完成：
-
-```powershell
-node skill/scripts/setup.js <项目目录> <技能目录> <node路径>
-```
+主流 AI 工具（如 Trae、Cursor、Claude Desktop 等）的设置页面都支持上传 Skill。将项目中的 `skill/` 目录或其中的 `SKILL.md` 文件上传即可。
 
 ### 第三步：配置 MCP
 

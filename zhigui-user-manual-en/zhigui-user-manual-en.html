@@ -338,29 +338,13 @@
   <div class="step">
     <div class="step-num">1</div>
     <div class="step-body">
-      <div class="step-title">Locate Your AI Tool's Skill Directory</div>
-      <p>Different AI tools have different skill directory locations:</p>
-      <ul>
-        <li><strong>Trae</strong>: <code>%USERPROFILE%\.trae-cn\skills\</code></li>
-        <li><strong>Other AI tools with skill directory support</strong>: Refer to their respective documentation</li>
-      </ul>
+      <div class="step-title">Upload the Skill in Your AI Tool</div>
+      <p>Mainstream AI tools (such as Trae, Cursor, Claude Desktop, etc.) support uploading Skills via their settings page. Upload the project's <code>skill/</code> directory or the <code>SKILL.md</code> file within it.</p>
     </div>
   </div>
 
   <div class="step">
     <div class="step-num">2</div>
-    <div class="step-body">
-      <div class="step-title">Copy the Skill Files</div>
-      <p>Copy the contents of the project's <code>skill\</code> directory to your AI tool's skill directory:</p>
-      <pre><code># Using Trae as an example (PowerShell)
-Copy-Item -Path .\skill\* -Destination $env:USERPROFILE\.trae-cn\skills\zhigui\ -Recurse</code></pre>
-      <p>Or use the project's built-in setup script to do it automatically:</p>
-      <pre><code>node skill/scripts/setup.js &lt;project_directory&gt; &lt;skill_directory&gt; &lt;node_path&gt;</code></pre>
-    </div>
-  </div>
-
-  <div class="step">
-    <div class="step-num">3</div>
     <div class="step-body">
       <div class="step-title">Verify the Skill is Loaded</div>
       <p>Start a new conversation in your AI tool. If the AI can recognize ZhiGui-related commands (e.g., "Show me today's schedule"), the skill has been successfully loaded.</p>

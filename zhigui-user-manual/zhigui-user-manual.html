@@ -338,29 +338,13 @@
   <div class="step">
     <div class="step-num">1</div>
     <div class="step-body">
-      <div class="step-title">找到 AI 工具的技能目录</div>
-      <p>不同 AI 工具的技能目录位置不同：</p>
-      <ul>
-        <li><strong>Trae</strong>：<code>%USERPROFILE%\.trae-cn\skills\</code></li>
-        <li><strong>其他支持技能目录的 AI 工具</strong>：参考各自文档</li>
-      </ul>
+      <div class="step-title">在 AI 工具中上传 Skill</div>
+      <p>主流 AI 工具（如 Trae、Cursor、Claude Desktop 等）的设置页面都支持上传 Skill。将项目中的 <code>skill/</code> 目录或其中的 <code>SKILL.md</code> 文件上传即可。</p>
     </div>
   </div>
 
   <div class="step">
     <div class="step-num">2</div>
-    <div class="step-body">
-      <div class="step-title">复制技能文件</div>
-      <p>将项目中的 <code>skill\</code> 目录内容复制到 AI 工具的技能目录下：</p>
-      <pre><code># 以 Trae 为例（PowerShell）
-Copy-Item -Path .\skill\* -Destination $env:USERPROFILE\.trae-cn\skills\zhigui\ -Recurse</code></pre>
-      <p>或者使用项目自带的 setup 脚本自动完成：</p>
-      <pre><code>node skill/scripts/setup.js &lt;项目目录&gt; &lt;技能目录&gt; &lt;node路径&gt;</code></pre>
-    </div>
-  </div>
-
-  <div class="step">
-    <div class="step-num">3</div>
     <div class="step-body">
       <div class="step-title">验证 Skill 已加载</div>
       <p>在 AI 工具中开始新对话。如果 AI 能识别知归相关的指令（如「查看今日安排」），说明 Skill 已成功加载。</p>
