@@ -17,10 +17,12 @@
  *   - getProfileAwareSlots(workHabit, latestTaskTime, latestHour, chronotype)
  *   - genId(prefix), daysBetween(dateStr)
  *
- * Zero dependencies beyond Node.js built-ins and ./date-utils.
+ * Dependencies: ./date-utils, ./attention-engine.
  */
 
 const DateUtils = require('./date-utils');
+const AttentionEngine = require('./attention-engine');
+const logger = require('./logger');
 
 // ─── Constants ────────────────────────────────────────────────────────────
 
@@ -99,7 +101,9 @@ function getDomainWeight(domain, valueSystem) {
     const pk = String(p.domain || '').trim().toLowerCase();
     return pk === key || pk === normalizedDomain || DOMAIN_ALIAS[pk] === normalizedDomain;
   });
-  return entry ? entry.weight : 50;
+  if (entry) return entry.weight;
+  if (domain) logger.debug(`[scheduler] Unknown domain "${domain}", falling back to weight 50`);
+  return 50;
 }
 
 /**
@@ -111,11 +115,7 @@ function getDomainWeight(domain, valueSystem) {
  */
 function analyzeNotesContext(notes, dateStr) {
   const recentNotes = [];
-  const cutoff = new Date(dateStr);
-  cutoff.setDate(cutoff.getDate() - 7);
-  const cutoffStr = cutoff.getFullYear() + '-' +
-    String(cutoff.getMonth() + 1).padStart(2, '0') + '-' +
-    String(cutoff.getDate()).padStart(2, '0');
+  const cutoffStr = DateUtils.nextDay(dateStr, -7);
 
   const allNotes = Array.isArray(notes) ? notes : Object.values(notes || {}).flat();
   for (const note of allNotes) {
@@ -180,9 +180,9 @@ function getProfileAwareSlots(workHabit, latestTaskTime, latestHour, chronotype)
   if (profile === 'night_owl') {
     return {
       slots: [
-        { start: '10:00', end: '12:00', label: 'Regular slot', priority: 'mid', hours: 2 },
-        { start: '14:00', end: '17:00', label: 'Prime slot', priority: 'high', hours: 3 },
-        { start: '19:00', end: latestTaskTime, label: 'Deep slot', priority: 'high', hours: Math.max(latestHour - 19, 0) },
+        { start: '10:00', end: '12:00', label: 'Regular slot', intensity: 'mid', hours: 2 },
+        { start: '14:00', end: '17:00', label: 'Prime slot', intensity: 'high', hours: 3 },
+        { start: '19:00', end: latestTaskTime, label: 'Deep slot', intensity: 'high', hours: Math.max(latestHour - 19, 0) },
       ],
       profile: 'night_owl',
       note: 'Night-owl routine; prime slot shifted to afternoon and evening',
@@ -191,9 +191,9 @@ function getProfileAwareSlots(workHabit, latestTaskTime, latestHour, chronotype)
   if (profile === 'early_bird') {
     return {
       slots: [
-        { start: '07:00', end: '10:00', label: 'Prime slot', priority: 'high', hours: 3 },
-        { start: '10:00', end: '12:00', label: 'Regular slot', priority: 'mid', hours: 2 },
-        { start: '14:00', end: '17:00', label: 'Light slot', priority: 'low', hours: 3 },
+        { start: '07:00', end: '10:00', label: 'Prime slot', intensity: 'high', hours: 3 },
+        { start: '10:00', end: '12:00', label: 'Regular slot', intensity: 'mid', hours: 2 },
+        { start: '14:00', end: '17:00', label: 'Light slot', intensity: 'low', hours: 3 },
       ],
       profile: 'early_bird',
       note: 'Early-bird routine; prime slot shifted to morning',
@@ -201,60 +201,31 @@ function getProfileAwareSlots(workHabit, latestTaskTime, latestHour, chronotype)
   }
   return {
     slots: [
-      { start: '09:00', end: '12:00', label: 'Prime slot', priority: 'high', hours: 3 },
-      { start: '14:00', end: '17:00', label: 'Regular slot', priority: 'mid', hours: 3 },
-      { start: '19:00', end: latestTaskTime, label: 'Light slot', priority: 'low', hours: Math.max(latestHour - 19, 0) },
+      { start: '09:00', end: '12:00', label: 'Prime slot', intensity: 'high', hours: 3 },
+      { start: '14:00', end: '17:00', label: 'Regular slot', intensity: 'mid', hours: 3 },
+      { start: '19:00', end: latestTaskTime, label: 'Light slot', intensity: 'low', hours: Math.max(latestHour - 19, 0) },
     ],
     profile: 'standard',
     note: 'Standard routine slots',
   };
 }
 
-// ─── Cost-effectiveness calculation ───────────────────────────────────────
-
-/**
- * Cost-effectiveness (0-30): feasibility of completion within remaining time.
- * @param {Object} g - Goal object
- * @param {Object} state - Full state (for userProfile.dailyCapacity)
- * @returns {number} Score 0-30
- */
-function computeCostPerf(g, state) {
-  const dl = g.deadline ? daysBetween(g.deadline) : null;
-  if (dl == null) return 18;
-  const est = (g.estimatedHours && g.estimatedHours > 0) ? g.estimatedHours : 12;
-  const dailyCap = (state.userProfile && state.userProfile.dailyCapacity) || 3;
-  const avail = Math.max(dl, 1) * dailyCap;
-  if (est <= avail * 0.7) return 30;
-  if (est <= avail) return 24;
-  if (est <= avail * 1.5) return 14;
-  return 6;
-}
-
 // ─── Task 3.3: Pre-computation functions (move loop-invariant work outside the daily loop) ──
 
 /**
- * Pre-compute goal enrichment (domain, domainWeight, costPerf, effectiveScore) for all active goals.
- * These values only depend on the goal itself, the state, and the valueSystem — none of which
- * change between days in a single scheduling run. Computing them once here avoids re-evaluating
- * mapGoalToDomain, getDomainWeight, and computeCostPerf for every goal on every day.
+ * Pre-compute descriptive goal metadata for a schedule that the assistant has
+ * already selected. These fields explain a placement; they never select it.
  *
  * @param {Array} activeGoals - All active (incomplete) goals
- * @param {Object} state - Full state (for userProfile.dailyCapacity)
+ * @param {Object} state - Full state (for userProfile valueSystem)
  * @param {Object} valueSystem - User's value system
- * @returns {Array} Enriched goal objects with _domain, _domainWeight, _costPerf, _effectiveScore
+ * @returns {Array} Enriched goal objects with _domain and _domainWeight
  */
 function precomputeGoalEnrichment(activeGoals, state, valueSystem) {
-  // effectiveScore: AI-scored goals use their AI priority directly (AI already
-  // factored in domain alignment, cost-perf, and user values). Rule-scored goals
-  // get a small domain-weight nudge as a heuristic — but the AI can override anytime.
   return activeGoals.map(g => {
     const domain = mapGoalToDomain(g);
     const domainWeight = getDomainWeight(domain, valueSystem);
-    const costPerf = computeCostPerf(g, state);
-    const effectiveScore = g.scoreSource === 'ai'
-      ? g.priority
-      : g.priority + domainWeight * 0.5;
-    return { ...g, _domain: domain, _domainWeight: domainWeight, _costPerf: costPerf, _effectiveScore: effectiveScore };
+    return { ...g, _domain: domain, _domainWeight: domainWeight };
   });
 }
 
@@ -301,11 +272,7 @@ function analyzeNotesContextFast(precomputed, dateStr) {
   if (!precomputed) return { intensityModifier: 1.0, signals: [], recentNoteCount: 0 };
 
   // Compute cutoff date string (7 days before dateStr)
-  const cutoff = new Date(dateStr);
-  cutoff.setDate(cutoff.getDate() - 7);
-  const cutoffStr = cutoff.getFullYear() + '-' +
-    String(cutoff.getMonth() + 1).padStart(2, '0') + '-' +
-    String(cutoff.getDate()).padStart(2, '0');
+  const cutoffStr = DateUtils.nextDay(dateStr, -7);
 
   // Count notes by signal in the [cutoff, dateStr] window using pre-computed date strings
   let recentNoteCount = 0;
@@ -419,7 +386,7 @@ function parseConstraintRules(constraints) {
     for (const rule of rules) {
       if (rule.type === 'no_late_night') {
         if (rule.sleepTime) {
-          const sleepHour = parseInt(String(rule.sleepTime).split(':')[0]);
+          const sleepHour = parseInt(String(rule.sleepTime).split(':')[0], 10);
           latestTaskTime = String(Math.max(sleepHour - 2, 19)).padStart(2, '0') + ':00';
         }
         constraintRules.push({ type: 'no_late_night', rule: `latest task time ${latestTaskTime}`, constraintId: c.id });
@@ -501,21 +468,26 @@ function scheduleSingleDay(opts) {
   if (!state.schedule.days[dateStr]) {
     state.schedule.days[dateStr] = { date: dateStr, weekday: WEEKDAYS[weekday], tasks: [] };
   }
-  // Preserve manual tasks + manually-locked AI tasks
-  const existingTasks = state.schedule.days[dateStr].tasks.filter(t => t.source !== 'ai' || t.manualLocked === true);
+  // Preserve manual tasks, manually-locked AI tasks, and carried-forward tasks
+  // (carriedFrom indicates the task was moved here by runDailyCheck's carry-forward)
+  const existingTasks = state.schedule.days[dateStr].tasks.filter(t =>
+    t.source !== 'ai' || t.manualLocked === true || t.carriedFrom
+  );
 
   // Calculate time ranges occupied by locked tasks
   const lockedTimeRanges = existingTasks
     .filter(t => t.manualLocked || t.source !== 'ai')
     .map(t => {
-      const startMin = t.time ? parseInt(t.time.split(':')[0]) * 60 + parseInt(t.time.split(':')[1] || '0') : 0;
+      if (!t.time || typeof t.time !== 'string') return null;
+      const startMin = parseInt(t.time.split(':')[0], 10) * 60 + parseInt(t.time.split(':')[1] || '0', 10);
       const dur = t.duration || 60;
       return { start: startMin, end: startMin + dur, title: t.title };
-    });
+    })
+    .filter(Boolean);
 
   const isTimeBlocked = (slotStart, slotEnd) => {
-    const sMin = parseInt(slotStart.split(':')[0]) * 60 + parseInt(slotStart.split(':')[1] || '0');
-    const eMin = parseInt(slotEnd.split(':')[0]) * 60 + parseInt(slotEnd.split(':')[1] || '0');
+    const sMin = parseInt(slotStart.split(':')[0], 10) * 60 + parseInt(slotStart.split(':')[1] || '0', 10);
+    const eMin = parseInt(slotEnd.split(':')[0], 10) * 60 + parseInt(slotEnd.split(':')[1] || '0', 10);
     return lockedTimeRanges.some(r => sMin < r.end && eMin > r.start);
   };
 
@@ -554,15 +526,14 @@ function scheduleSingleDay(opts) {
       time: errand.time || '09:00',
       duration: errand.duration || 60,
       title: errand.title,
-      description: errand.note || `Errand (${errand.priority} level)`,
-      priority: errand.priority === 'must' ? 100 : errand.priority === 'should' ? 60 : 30,
+      description: errand.note || `Errand (${errand.commitmentLevel} commitment)`,
       completed: false,
       source: 'errand',
       category: 'errand',
       errandId: errand.id,
     };
     errandTasks.push(errandTask);
-    if (errand.priority === 'must') {
+    if (errand.commitmentLevel === 'must') {
       decisionReasons.push({
         type: 'errand_placed',
         title: `Errand first: ${errand.title}`,
@@ -627,27 +598,29 @@ function scheduleSingleDay(opts) {
     };
   }
 
-  // Value-based goal enrichment
-  // Task 3.3: use pre-enriched goals when available (avoids re-computing domain/weight/costPerf per day)
-  const _calcEffectiveScore = (g, domainWeight) => g.scoreSource === 'ai'
-    ? g.priority
-    : g.priority + domainWeight * 0.5;
-  const enrichedTodayGoals = enrichedGoals
+  // The incoming order is the assistant's explicit focus order. Scheduler only
+  // allocates time around constraints; it must not re-rank goals.
+  // PERF #5: Build a Map for O(1) lookup instead of linear .find() per goal.
+  const enrichedById = enrichedGoals
+    ? new Map(enrichedGoals.map(eg => [eg.id, eg]))
+    : null;
+  const enrichedTodayGoals = enrichedById
     ? todayGoals.map(g => {
-        const pre = enrichedGoals.find(eg => eg.id === g.id);
+        const pre = enrichedById.get(g.id);
         return pre || (() => {
           const domain = mapGoalToDomain(g);
           const domainWeight = getDomainWeight(domain, valueSystem);
-          const costPerf = computeCostPerf(g, state);
-          return { ...g, _domain: domain, _domainWeight: domainWeight, _costPerf: costPerf, _effectiveScore: _calcEffectiveScore(g, domainWeight) };
+          return { ...g, _domain: domain, _domainWeight: domainWeight };
         })();
       })
     : todayGoals.map(g => {
         const domain = mapGoalToDomain(g);
         const domainWeight = getDomainWeight(domain, valueSystem);
-        const costPerf = computeCostPerf(g, state);
-        return { ...g, _domain: domain, _domainWeight: domainWeight, _costPerf: costPerf, _effectiveScore: _calcEffectiveScore(g, domainWeight) };
+        return { ...g, _domain: domain, _domainWeight: domainWeight };
       });
+
+  // PERF #5: Build a Map for enrichedTodayGoals to avoid repeated .find() in the slot loop.
+  const todayGoalsById = new Map(enrichedTodayGoals.map(g => [g.id, g]));
 
   // Pre-mark carried-forward goals
   const carriedGoalIds = new Set();
@@ -659,25 +632,24 @@ function scheduleSingleDay(opts) {
 
   // Slot allocation loop
   for (const slot of dailySlots) {
-    const slotHour = parseInt(slot.start.split(':')[0]);
-    if (slotHour >= latestHour && slot.priority === 'low') break;
+    const slotHour = parseInt(slot.start.split(':')[0], 10);
+    if (slotHour >= latestHour && slot.intensity === 'low') break;
     if (slot.hours <= 0) continue;
 
     if (isTimeBlocked(slot.start, slot.end)) {
       decisionReasons.push({
         type: 'slot_blocked',
         title: `Skip ${slot.start}-${slot.end} (${slot.label})`,
-        reason: `Slot occupied by manually-locked task: ${lockedTimeRanges.find(r => parseInt(slot.start.split(':')[0]) * 60 < r.end && parseInt(slot.end.split(':')[0]) * 60 > r.start)?.title || 'locked'}`,
+        reason: `Slot occupied by manually-locked task: ${lockedTimeRanges.find(r => parseInt(slot.start.split(':')[0], 10) * 60 < r.end && parseInt(slot.end.split(':')[0], 10) * 60 > r.start)?.title || 'locked'}`,
       });
       continue;
     }
 
     let selectedGoal = null;
-    let valueBasedSelection = false;
-
     const assignedBaseTitles = new Set();
     for (const id of assignedGoalIds) {
-      const g = enrichedTodayGoals.find(x => x.id === id);
+      // PERF #5: Use Map lookup instead of linear find
+      const g = todayGoalsById.get(id);
       if (g && g.baseTitle) assignedBaseTitles.add(g.baseTitle);
     }
 
@@ -688,24 +660,18 @@ function scheduleSingleDay(opts) {
     });
 
     if (unassigned.length > 0) {
-      if (slot.priority === 'high' && valueSystem) {
-        unassigned.sort((a, b) => b._effectiveScore - a._effectiveScore);
-        selectedGoal = unassigned[0];
-        valueBasedSelection = true;
-      } else {
-        selectedGoal = unassigned[0];
-      }
+      selectedGoal = unassigned[0];
       assignedGoalIds.add(selectedGoal.id);
       if (selectedGoal.baseTitle) assignedBaseTitles.add(selectedGoal.baseTitle);
-    } else if (slot.priority === 'low') {
-      const reappearance = enrichedTodayGoals.find(g => g.priority >= 75 && assignedGoalIds.has(g.id) && !isOneShotGoal(g));
+    } else if (slot.intensity === 'low') {
+      const reappearance = enrichedTodayGoals.find(g => g.repeatInDay === true && assignedGoalIds.has(g.id) && !isOneShotGoal(g));
       if (reappearance) {
         selectedGoal = reappearance;
       }
     }
 
     if (selectedGoal) {
-      const baseDuration = slot.priority === 'high' ? 120 : slot.priority === 'mid' ? 90 : 60;
+      const baseDuration = slot.intensity === 'high' ? 120 : slot.intensity === 'mid' ? 90 : 60;
       const isOneShot = isOneShotGoal(selectedGoal);
       const taskDuration = Math.round((isOneShot ? 30 : baseDuration) * intensityModifier);
       const taskCategory = isOneShot ? 'reminder' : 'study';
@@ -713,7 +679,7 @@ function scheduleSingleDay(opts) {
       let taskTitle = selectedGoal.title;
       if (isOneShot) {
         const ddl = selectedGoal.deadline;
-        const cnt = ddl ? Math.max(0, Math.round((new Date(ddl) - new Date(dateStr)) / 86400000)) : null;
+        const cnt = ddl ? Math.max(0, DateUtils.daysBetween(ddl, dateStr)) : null;
         taskTitle = `Follow-up: ${taskTitle} (${cnt != null ? cnt : '?'} days left)`;
       } else if (selectedGoal.phaseName) {
         taskTitle = `[${selectedGoal.phaseName}] ${taskTitle}`;
@@ -727,34 +693,27 @@ function scheduleSingleDay(opts) {
         duration: taskDuration,
         title: taskTitle,
         description: selectedGoal.detail || selectedGoal.description || '',
-        priority: selectedGoal.priority,
-        costPerf: selectedGoal._costPerf,
         completed: false,
         source: 'ai',
         category: taskCategory,
         relatedGoalId: selectedGoal.id,
         relatedStrategicGoalId: relatedStrategicGoalId,
+        noteIds: Array.isArray(selectedGoal.noteIds) ? [...selectedGoal.noteIds] : undefined,
       };
 
       const allExisting = [...existingTasks, ...errandTasks];
       const conflict = allExisting.some(t => {
-        const tHour = parseInt(t.time.split(':')[0]);
-        const sHour = parseInt(slot.start.split(':')[0]);
-        const eHour = parseInt(slot.end.split(':')[0]);
+        if (!t.time || typeof t.time !== 'string') return false;
+        const tHour = parseInt(t.time.split(':')[0], 10);
+        const sHour = parseInt(slot.start.split(':')[0], 10);
+        const eHour = parseInt(slot.end.split(':')[0], 10);
         return tHour >= sHour && tHour < eHour;
       });
 
       if (!conflict) {
         newTasks.push(task);
-        let placeReason = `${selectedGoal.title} (priority ${selectedGoal.priority}) scheduled at ${slot.start}, because this slot is not occupied by an errand`;
-        if (valueBasedSelection && selectedGoal._domain) {
-          placeReason += `. Value-based decision: ${selectedGoal._domain} domain weight ${selectedGoal._domainWeight}, composite score ${selectedGoal._effectiveScore.toFixed(1)} (priority ${selectedGoal.priority} + weight ${selectedGoal._domainWeight}*0.5)`;
-        }
-        const cpLabel = selectedGoal._costPerf >= 30 ? 'high (comfortably fits remaining time)'
-          : selectedGoal._costPerf >= 24 ? 'good (fits remaining time)'
-          : selectedGoal._costPerf >= 14 ? 'tight (may overrun)'
-          : 'low (unrealistic for remaining time)';
-        placeReason += `. Cost-effectiveness ${selectedGoal._costPerf}/30 — ${cpLabel}`;
+        let placeReason = `${selectedGoal.title} placed at ${slot.start} because it is next in the assistant-provided focus order and this slot is not occupied by an errand`;
+        if (selectedGoal._domain) placeReason += `. Context domain: ${selectedGoal._domain}`;
         if (intensityModifier < 1.0) {
           placeReason += `. Today's task intensity adjusted to ${Math.round(intensityModifier * 100)}% (based on note-context analysis); task duration changed from ${baseDuration} minutes to ${taskDuration} minutes`;
         }
@@ -774,14 +733,13 @@ function scheduleSingleDay(opts) {
     }
 
     // Daily exercise
-    if (dailyExercise > 0 && slot.priority === 'low' && newTasks.length > 0) {
+    if (dailyExercise > 0 && slot.intensity === 'low' && newTasks.length > 0) {
       const exerciseTask = {
         id: genId('t'),
         time: latestTaskTime,
         duration: dailyExercise,
         title: 'Exercise',
         description: 'Daily exercise (constraint)',
-        priority: 60,
         completed: false,
         source: 'ai',
         category: 'exercise',
@@ -800,7 +758,7 @@ function scheduleSingleDay(opts) {
       reason: carryForwardTasks.map(t => `${t.title} (from ${t.carriedFrom})`).join('; '),
     });
   }
-  state.schedule.days[dateStr].tasks = allTasks.sort((a, b) => a.time.localeCompare(b.time));
+  state.schedule.days[dateStr].tasks = allTasks.sort((a, b) => (a.time || '').localeCompare(b.time || ''));
   state.schedule.days[dateStr].weekday = WEEKDAYS[weekday];
 
   const generatedDay = {
@@ -820,13 +778,16 @@ function scheduleSingleDay(opts) {
 // ─── Sub-function 4: generateBriefings ───────────────────────────────────
 
 /**
- * Generate the morning briefing for a rolling window of days.
+ * Generate the morning briefing for today only.
  *
- * // mutates: state.briefings (replaced), state.morningBriefing (set to today's)
+ * Non-today briefings are intentionally not generated or persisted. The briefing
+ * is a daily, date-specific signal — keeping a rolling window leaks stale
+ * guidance and makes the storage model confusing.
+ *
+ * // mutates: state.briefings (replaced with today's only), state.morningBriefing
  *
  * @param {Object} opts
- * @param {string} opts.start - Start date (YYYY-MM-DD)
- * @param {number} opts.briefingDays - Number of days to generate briefings for
+ * @param {string} opts.start - Start date (YYYY-MM-DD), must be today
  * @param {Array} opts.errands - Incomplete errands
  * @param {Array} opts.activeGoals - Active goals (with daysLeft, overdue computed)
  * @param {Array} opts.notes - All notes
@@ -839,7 +800,7 @@ function scheduleSingleDay(opts) {
  */
 function generateBriefings(opts) {
   const {
-    start, briefingDays, errands, activeGoals, notes, state,
+    start, errands, activeGoals, notes, state,
     constraintRules, strategicGoals, profileBackground, panelLang,
     restDays, dailyExercise, dailyAvailableHours,
   } = opts;
@@ -856,7 +817,6 @@ function generateBriefings(opts) {
         none: 'No recommendation',
         mustErrand: 'Must-do errand',
         overdue: 'OVERDUE',
-        priority: 'priority',
         noLate: (t) => `Avoid scheduling tasks after ${t} (constraint: no late nights)`,
         push: (title) => `${title}: keep making daily progress`,
         weekNote: (dom) => `This week has more ${dom}-type matters — watch your time allocation`,
@@ -867,7 +827,6 @@ function generateBriefings(opts) {
         none: '暂无推荐',
         mustErrand: '必办琐事',
         overdue: '已逾期',
-        priority: '优先级',
         noLate: (t) => `避免在 ${t} 之后安排任务（约束：不熬夜）`,
         push: (title) => `${title}：保持每日推进`,
         weekNote: (dom) => `本周${dom}类事务较多，注意时间分配`,
@@ -877,150 +836,216 @@ function generateBriefings(opts) {
   const noteDomEn = { health: 'Health', relationship: 'Relationship', career: 'Career', academic: 'Academic', social: 'Social', misc: 'Other' };
   const domLabel = (d) => (panelLang === 'en' ? (noteDomEn[d] || d) : (noteDomZh[d] || d));
 
+  // ── Today only ──
+  const bdDateStr = DateUtils.todayStr();
+  const bdDate = new Date(bdDateStr + 'T00:00:00');
+
+  // Replace briefings with today's single entry only; discard any stale entries.
   state.briefings = {};
-  for (let bd = 0; bd < briefingDays; bd++) {
-    const bdDate = new Date(start);
-    bdDate.setDate(bdDate.getDate() + bd);
-    const bdDateStr = bdDate.getFullYear() + '-' +
-      String(bdDate.getMonth() + 1).padStart(2, '0') + '-' +
-      String(bdDate.getDate()).padStart(2, '0');
-    const bdOffset = bd;
 
-    const dayErrands = errands.filter(e => e.date === bdDateStr);
-    const mustErrands = dayErrands.filter(e => e.priority === 'must');
+  // ── Action index: ultra-lightweight summaries for AI to decide what to deep-read ──
+  // Engine does NOT truncate or select — it gives the full index, letting AI decide relevance.
+  // All fields are index-level (no body content, no summary) to minimize token cost.
 
-    const upcomingGoalsBd = activeGoals.filter(g => {
-      if (g.overdue) return true;
-      if (g.daysLeft === null || g.daysLeft === undefined) return false;
-      return (g.daysLeft - bdOffset) <= upcomingWindowDays;
-    }).sort((a, b) => {
-      if (a.overdue !== b.overdue) return a.overdue ? -1 : 1;
-      return ((a.daysLeft || 0) - bdOffset) - ((b.daysLeft || 0) - bdOffset);
-    }).filter((g, idx, arr) => {
-      const key = g.baseTitle || g.title;
-      return idx === arr.findIndex(x => (x.baseTitle || x.title) === key);
+  // Recent actions index (7 days): id + title + pattern + completedAt only
+  const recentActionsCutoff = new Date();
+  recentActionsCutoff.setDate(recentActionsCutoff.getDate() - 7);
+  const recentActions = (state.completedActions || [])
+    .filter(a => new Date(a.completedAt) >= recentActionsCutoff)
+    .sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt))
+    .map(a => ({ id: a.id, title: a.title, pattern: a.pattern, completedAt: a.completedAt }));
+
+  // Past action hints index (3-30 days, one-time, not yet hinted): for proactive recall
+  const proactiveCutoff = new Date();
+  proactiveCutoff.setDate(proactiveCutoff.getDate() - 3);
+  const proactiveOldCutoff = new Date();
+  proactiveOldCutoff.setDate(proactiveOldCutoff.getDate() - 30);
+  const pastActionHints = (state.completedActions || [])
+    .filter(a => {
+      if (a.pattern === 'recurring') return false;
+      if (a._hinted) return false;
+      const d = new Date(a.completedAt);
+      return d >= proactiveOldCutoff && d < proactiveCutoff;
+    })
+    .sort((a, b) => new Date(a.completedAt) - new Date(b.completedAt))
+    .map(a => {
+      const daysAgo = Math.round((new Date() - new Date(a.completedAt)) / 86400000);
+      return { id: a.id, title: a.title, daysAgo, category: a.category || 'misc' };
     });
 
-    const upcomingNoteReminders = [];
-    for (const note of notes) {
-      if (!note.relatedDate) continue;
-      const dl = daysBetween(note.relatedDate);
-      if (dl === null) continue;
-      const dlOnDay = dl - bdOffset;
-      if (dlOnDay >= 0 && dlOnDay <= upcomingWindowDays) {
-        upcomingNoteReminders.push({ ...note, daysUntil: dlOnDay });
-      }
-    }
+  const dayErrands = errands.filter(e => e.date === bdDateStr);
+  const mustErrands = dayErrands.filter(e => e.commitmentLevel === 'must');
 
-    // ── Collect must-items for fallback text ──
-    const dayReminders = (state.reminders || []).filter(rm => {
-      if (rm.fired && !rm.repeat) return false;
-      const rmDate = (rm.triggerAt || '').slice(0, 10);
-      return rmDate === bdDateStr;
-    });
-    const mustItems = [];
-    if (dayReminders.length > 0) {
-      mustItems.push(...dayReminders.map(rm => {
-        const time = (rm.triggerAt || '').slice(11, 16);
-        return `\u23f0 ${rm.title}${time ? ' ' + time : ''}`;
-      }));
-    }
-    if (mustErrands.length > 0) {
-      mustItems.push(...mustErrands.map(e => e.title));
-    }
-    if (upcomingGoalsBd.length > 0) {
-      mustItems.push(...upcomingGoalsBd.map(g => {
-        if (g.overdue) return `[${I18.overdue}] ${g.title}`;
-        const daysLeft = g.daysLeft - bdOffset;
-        if (daysLeft === 0) return `[DUE] ${g.title}`;
-        return `[${daysLeft}d] ${g.title}`;
-      }));
-    }
+  const upcomingGoalsBd = activeGoals.filter(g => {
+    if (g.overdue) return true;
+    if (g.daysLeft === null || g.daysLeft === undefined) return false;
+    return g.daysLeft <= upcomingWindowDays;
+  }).sort((a, b) => {
+    if (a.overdue !== b.overdue) return a.overdue ? -1 : 1;
+    return (a.daysLeft || 0) - (b.daysLeft || 0);
+  }).filter((g, idx, arr) => {
+    const key = g.baseTitle || g.title;
+    return idx === arr.findIndex(x => (x.baseTitle || x.title) === key);
+  });
 
-    // ── Build structured briefing data for AI to compose natural-language report ──
-    const dayTasks = state.schedule?.days?.[bdDateStr]?.tasks || [];
-    const incompleteTasks = dayTasks.filter(t => !t.completed);
-    const totalScheduledMin = incompleteTasks.reduce((s, t) => s + (t.duration || 60), 0);
-    const errandMin = mustErrands.length * 60;
-    const dailyCap = state.userProfile?.dailyCapacity || 480;
-    const scheduledHours = Math.round(totalScheduledMin / 60 * 10) / 10;
-    const errandHours = Math.round(errandMin / 60 * 10) / 10;
-
-    const topTask = incompleteTasks.sort((a, b) =>
-      ((b.priority || 0) + (b.costPerf || 0)) - ((a.priority || 0) + (a.costPerf || 0))
-    )[0];
-
-    // Collect note signals for today's context
-    const noteSignals = [];
-    const recentNotes = notes.filter(n => {
-      if (!n.createdAt) return false;
-      return daysBetween(n.createdAt) === 0 || (n.relatedDate && daysBetween(n.relatedDate) === 0);
-    });
-    for (const n of recentNotes.slice(0, 5)) {
-      noteSignals.push({ id: n.id, title: n.title, domain: n.domain, topicId: n.topicId });
-    }
-
-    // Goal progress (deduplicated by baseTitle)
-    const goalProgress = upcomingGoalsBd.slice(0, 5).map(g => ({
-      id: g.id, title: g.title, domain: g.domain,
-      priority: g.priority, daysLeft: g.daysLeft - bdOffset, overdue: g.overdue,
-      phase: g.phaseName || g.baseTitle || null,
-    }));
-
-    // Hard constraints for today
-    const hardConstraints = [];
-    if (constraintRules.find(r => r.type === 'no_late_night')) {
-      hardConstraints.push({ type: 'no_late_night', latestTime: latestTaskTime });
-    }
-    if (safeRestDays.includes(weekday)) {
-      hardConstraints.push({ type: 'rest_day' });
-    }
-    if (dailyExercise) {
-      hardConstraints.push({ type: 'daily_exercise', duration: dailyExercise });
-    }
-    if (dailyCap < 480) {
-      hardConstraints.push({ type: 'limited_hours', hours: Math.round(dailyCap / 60) });
-    }
-
-    // Value system snapshot (for AI to reason about trade-offs)
-    const valueSnapshot = valueSystem ? {
-      decisionStyle: valueSystem.decisionStyle || 'balanced',
-      topDomains: (valueSystem.priorities || []).slice(0, 5).map(p => ({ domain: p.domain, weight: p.weight })),
-    } : null;
-
-    state.briefings[bdDateStr] = {
-      date: bdDateStr,
-      // Structured data — AI will compose natural language via zhigui_set_briefing
-      _raw: true,  // flag: briefing not yet composed by AI
-      mustReminders: dayReminders.map(rm => ({ id: rm.id, title: rm.title, time: (rm.triggerAt || '').slice(11, 16), priority: rm.priority })),
-      mustErrands: mustErrands.map(e => ({ id: e.id, title: e.title, priority: e.priority })),
-      upcomingGoals: upcomingGoalsBd.map(g => ({ id: g.id, title: g.title, daysLeft: g.daysLeft - bdOffset, overdue: g.overdue })),
-      noteReminders: upcomingNoteReminders.slice(0, 3).map(n => ({ id: n.id, domain: n.domain, content: n.content, daysUntil: n.daysUntil })),
-      topTask: topTask ? { id: topTask.id, title: topTask.title, priority: topTask.priority, costPerf: topTask.costPerf, time: topTask.time, duration: topTask.duration, estimatedTime: topTask.estimatedTime } : null,
-      timeBudget: { availableHours: Math.round(dailyCap / 60), scheduledHours, errandHours },
-      hardConstraints,
-      noteSignals,
-      goalProgress,
-      valueSystem: valueSnapshot,
-      userContext: profileBackground ? { identity: profileBackground } : undefined,
-      // Fallback text fields (used when AI hasn't composed yet — frontend renders these)
-      mustDo: mustItems.join('; ') || I18.noTask,
-      recommended: topTask ? `${topTask.title} (${I18.priority} ${topTask.priority}${topTask.costPerf != null ? `, 性价比 ${topTask.costPerf}/30` : ''}, ${topTask.time})` : (activeGoals.length > 0 ? `${activeGoals[0].title} (${I18.priority} ${activeGoals[0].priority})` : I18.none),
-      notRecommended: constraintRules.find(r => r.type === 'no_late_night') ? I18.noLate(latestTaskTime) : '',
-      strategicReminder: strategicGoals.length > 0 ? I18.push(strategicGoals[0].title) : '',
-      dailyQuote: I18.quote,
-    };
-
-    if (bd === 0) {
-      state.morningBriefing = state.briefings[bdDateStr];
+  const upcomingNoteReminders = [];
+  for (const note of notes) {
+    if (!note.relatedDate) continue;
+    const dl = daysBetween(note.relatedDate);
+    if (dl === null) continue;
+    if (dl >= 0 && dl <= upcomingWindowDays) {
+      upcomingNoteReminders.push({ ...note, daysUntil: dl });
     }
   }
+
+  // ── Collect must-items for fallback text ──
+  const dayReminders = (state.reminders || []).filter(rm => {
+    if (rm.fired && !rm.repeat) return false;
+    const rmDate = (rm.triggerAt || '').slice(0, 10);
+    return rmDate === bdDateStr;
+  });
+  const mustItems = [];
+  if (dayReminders.length > 0) {
+    mustItems.push(...dayReminders.map(rm => {
+      const time = (rm.triggerAt || '').slice(11, 16);
+      return `\u23f0 ${rm.title}${time ? ' ' + time : ''}`;
+    }));
+  }
+  if (mustErrands.length > 0) {
+    mustItems.push(...mustErrands.map(e => e.title));
+  }
+  if (upcomingGoalsBd.length > 0) {
+    mustItems.push(...upcomingGoalsBd.map(g => {
+      if (g.overdue) return `[${I18.overdue}] ${g.title}`;
+      const daysLeft = g.daysLeft;
+      if (daysLeft === 0) return `[DUE] ${g.title}`;
+      return `[${daysLeft}d] ${g.title}`;
+    }));
+  }
+
+  // ── Build structured briefing data for AI to compose natural-language report ──
+  const dayTasks = state.schedule?.days?.[bdDateStr]?.tasks || [];
+  const incompleteTasks = dayTasks.filter(t => !t.completed);
+  const totalScheduledMin = incompleteTasks.reduce((s, t) => s + (t.duration || 60), 0);
+  const errandMin = mustErrands.length * 60;
+  const scheduledHours = Math.round(totalScheduledMin / 60 * 10) / 10;
+  const errandHours = Math.round(errandMin / 60 * 10) / 10;
+  // Capacity is NOT computed or surfaced here. The butler-style "day looks
+  // full" nudge and the high-stakes-day guard are AI behaviors defined in
+  // SKILL.md — the AI sums task durations from zhigui_get_day_schedule itself.
+  // We only expose neutral scheduling facts (how much is already placed on the day).
+
+  const topTask = incompleteTasks.sort((a, b) => (a.time || '').localeCompare(b.time || ''))[0];
+
+  // Goal progress (deduplicated by baseTitle) — full list, no artificial truncation
+  const goalProgress = upcomingGoalsBd.map(g => ({
+    id: g.id, title: g.title, domain: g.domain,
+    daysLeft: g.daysLeft, overdue: g.overdue,
+    phase: g.phaseName || g.baseTitle || null,
+  }));
+
+  // Hard constraints for today
+  const weekday = bdDate.getDay();
+  const hardConstraints = [];
+  if (constraintRules.find(r => r.type === 'no_late_night')) {
+    hardConstraints.push({ type: 'no_late_night', latestTime: latestTaskTime });
+  }
+  if (safeRestDays.includes(weekday)) {
+    hardConstraints.push({ type: 'rest_day' });
+  }
+  if (dailyExercise) {
+    hardConstraints.push({ type: 'daily_exercise', duration: dailyExercise });
+  }
+  // Capacity is NOT a hard constraint — the AI applies a soft butler-style
+  // reminder per SKILL.md; we never cap or trim the schedule in code.
+
+  // Value system snapshot (for AI to reason about trade-offs)
+  const valueSnapshot = valueSystem ? {
+    decisionStyle: valueSystem.decisionStyle || 'balanced',
+    topDomains: (valueSystem.priorities || []).map(p => ({ domain: p.domain, weight: p.weight })),
+  } : null;
+
+  state.briefings[bdDateStr] = {
+    date: bdDateStr,
+    // Structured data — AI will compose natural language via zhigui_set_briefing
+    _raw: true,  // flag: briefing not yet composed by AI
+    mustReminders: dayReminders.map(rm => ({ id: rm.id, title: rm.title, time: (rm.triggerAt || '').slice(11, 16), commitmentLevel: rm.commitmentLevel })),
+    mustErrands: mustErrands.map(e => ({ id: e.id, title: e.title, commitmentLevel: e.commitmentLevel })),
+    upcomingGoals: upcomingGoalsBd.map(g => ({ id: g.id, title: g.title, daysLeft: g.daysLeft, overdue: g.overdue })),
+    noteReminders: upcomingNoteReminders.map(n => ({ id: n.id, title: n.title, domain: n.domain, daysUntil: n.daysUntil })),
+    topTask: topTask ? { id: topTask.id, title: topTask.title, time: topTask.time, duration: topTask.duration, estimatedTime: topTask.estimatedTime } : null,
+    timeBudget: { scheduledHours, errandHours },
+    hardConstraints,
+    goalProgress,
+    valueSystem: valueSnapshot,
+    userContext: profileBackground ? { identity: profileBackground } : undefined,
+    recentActions,
+    pastActionHints,
+    // Fallback text fields (used when AI hasn't composed yet — frontend renders these)
+    mustDo: mustItems.join('; ') || I18.noTask,
+    recommended: topTask ? `${topTask.title} (${topTask.time})` : (activeGoals.length > 0 ? activeGoals[0].title : I18.none),
+    notRecommended: constraintRules.find(r => r.type === 'no_late_night') ? I18.noLate(latestTaskTime) : '',
+    strategicReminder: strategicGoals.length > 0 ? I18.push(strategicGoals[0].title) : '',
+    dailyQuote: I18.quote,
+  };
+
+  state.morningBriefing = state.briefings[bdDateStr];
+
+  // ── Attention digest: Situation / Risks / Opportunities / Decisions Needed ──
+  try {
+    const attentionSummary = AttentionEngine.getAttentionSummary(state, { lang: panelLang === 'en' ? 'en' : 'zh' });
+
+    const SITUATION_TYPES = new Set(['deadline', 'overdue', 'momentum_lost', 'recurrence_due']);
+    const RISK_TYPES = new Set(['blocked', 'conflict', 'stale']);
+    const OPPORTUNITY_TYPES = new Set(['hint_followup']);
+    const DECISION_NEEDED_TYPES = new Set(['need_decision']);
+
+    const mapSignal = (s) => ({
+      id: s.id,
+      type: s.type,
+      signalType: s.signalType,
+      signalStrength: s.signalStrength,
+      attentionReasons: s.attentionReasons || [],
+    });
+
+    const situation = (attentionSummary.topSignals || []).filter(s => SITUATION_TYPES.has(s.signalType)).map(mapSignal);
+    const risks = (attentionSummary.topSignals || []).filter(s => RISK_TYPES.has(s.signalType)).map(mapSignal);
+    const opportunities = (attentionSummary.topSignals || []).filter(s => OPPORTUNITY_TYPES.has(s.signalType)).map(mapSignal);
+    const decisionsNeeded = (attentionSummary.topSignals || []).filter(s => DECISION_NEEDED_TYPES.has(s.signalType)).map(mapSignal);
+
+    state.morningBriefing.attentionDigest = {
+      situation,
+      risks,
+      opportunities,
+      decisionsNeeded,
+    };
+    state.morningBriefing.meta = {
+      attentionComputedAt: attentionSummary.computedAt,
+      totalSignals: attentionSummary.totalEntities,
+    };
+  } catch (err) {
+    // AttentionEngine failure should not block morning briefing generation
+    state.morningBriefing.attentionDigest = { situation: [], risks: [], opportunities: [], decisionsNeeded: [] };
+    state.morningBriefing.meta = { attentionComputedAt: null, totalSignals: 0 };
+  }
+
+  // ── Pending decisions ──
+  const pendingDecisions = (state.decisions || [])
+    .filter(d => d.status === 'pending')
+    .map(d => ({
+      id: d.id,
+      title: d.title,
+      description: d.description,
+      createdAt: d.createdAt,
+      expiresAt: d.expiresAt,
+    }));
+  state.morningBriefing.pendingDecisions = pendingDecisions;
 }
 
 // ─── Sub-function 5: detectAndMergeConflicts ─────────────────────────────
 
 /**
- * Run conflict detection and merge with priority-clash detection.
+ * Run conflict detection and persist the detected conflicts.
  *
  * // mutates: state.conflicts (replaced with merged array)
  *
@@ -1033,42 +1058,7 @@ function generateBriefings(opts) {
 function detectAndMergeConflicts(state, activeGoals, dailySlots, detectConflictsFn) {
   const detectedConflicts = detectConflictsFn(state);
 
-  // Priority-conflict detection
-  const priorityClashes = [];
-  const highPriorityGoals = activeGoals.filter(g => g.priority >= 70);
-  if (highPriorityGoals.length > dailySlots.length) {
-    for (let i = dailySlots.length; i < highPriorityGoals.length; i++) {
-      priorityClashes.push({
-        type: 'priority_clash',
-        severity: 'warning',
-        title: 'High-priority goal slot competition',
-        description: `${highPriorityGoals.length} high-priority goals (>=70) compete for ${dailySlots.length} daily slots; "${highPriorityGoals[i].title}" (${highPriorityGoals[i].priority}) may not get enough prime-slot time`,
-        suggestion: `Suggestion: 1) lower the priority of "${highPriorityGoals[i].title}" 2) schedule it into a non-standard slot 3) consider splitting it into smaller sub-goals`,
-        relatedGoals: [highPriorityGoals[i].id],
-      });
-    }
-  }
-
-  // Check competition among same-score goals
-  const scoreGroups = {};
-  for (const g of activeGoals) {
-    const bucket = Math.floor(g.priority / 10) * 10;
-    if (!scoreGroups[bucket]) scoreGroups[bucket] = [];
-    scoreGroups[bucket].push(g);
-  }
-  for (const [bucket, goals] of Object.entries(scoreGroups)) {
-    if (goals.length > 2 && parseInt(bucket) >= 60) {
-      priorityClashes.push({
-        type: 'priority_clash',
-        severity: 'info',
-        title: `${bucket}-score bucket is dense`,
-        description: `${goals.length} goals fall in the ${bucket}-${parseInt(bucket) + 9} score bucket: ${goals.map(g => g.title).join(', ')}. These goals may compete with each other for time resources.`,
-        suggestion: 'Suggestion: further differentiate the priorities of these goals to spread out the scores and make scheduling more reasonable.',
-      });
-    }
-  }
-
-  state.conflicts = [...detectedConflicts, ...priorityClashes];
+  state.conflicts = detectedConflicts;
   return state.conflicts;
 }
 
@@ -1076,20 +1066,11 @@ function detectAndMergeConflicts(state, activeGoals, dailySlots, detectConflicts
 
 module.exports = {
   // Constants
-  DOMAIN_ALIAS,
   WEEKDAYS,
-  WEEKDAYS_FULL,
-  // Utility functions
-  genId,
-  daysBetween,
-  todayStr,
   // Helper functions
   isOneShotGoal,
-  mapGoalToDomain,
   getDomainWeight,
-  analyzeNotesContext,
   getProfileAwareSlots,
-  computeCostPerf,
   // Task 3.3: Pre-computation functions (move loop-invariant work outside the daily loop)
   precomputeGoalEnrichment,
   precomputeNoteSignals,

@@ -17,6 +17,9 @@ const Utils = require('../engine/utils');
 const { genId, todayStr, normalizeTime, normalizeDate } = Utils;
 
 const PORT = Number(process.env.ZHIGUI_PORT || 7788);
+// This process serves personal notes and schedules. It must never accept LAN
+// connections merely because Node's default listen() host is unspecified.
+const HOST = '127.0.0.1';
 // Data directory is resolved by the shared config loader (shared with MCP engine / Electron),
 // ensuring all three ends read/write the same .zhigui data; static assets are in ./public/.
 const { loadConfig } = require('../lib/config');
@@ -25,12 +28,12 @@ const { ensureDataInitialized } = require('../lib/init-data');
 ensureDataInitialized(CONFIG.dataDir);
 const ZHIGUI_DIR = CONFIG.dataDir;
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const STATE_FILE = path.join(ZHIGUI_DIR, 'state.json');
 const HISTORY_FILE = path.join(ZHIGUI_DIR, 'history.json');
 const INDEX_FILE = path.join(ZHIGUI_DIR, 'documents.json');
 
 const { BrainIndex } = require('../engine/brain-index');
 const Storage = require('../engine/storage');
+const { createDashboardState } = require('../engine/dashboard-state');
 Storage.setDataDir(ZHIGUI_DIR);
 const Actions = require('../engine/actions');
 Actions.configure(ZHIGUI_DIR);
@@ -41,25 +44,16 @@ function getBrainIndex() {
   return brainIndex;
 }
 
-// Record manual UI operations to the audit stream — failure does not affect the state write path.
-function recordManualToEvents(kind, summary, detail, meta) {}
-
 // ─── Document Split — Two-layer Retrieval Architecture (HTTP server also supported) ────────────────────────────
 const DOCUMENT_FILES = {
   goals: path.join(ZHIGUI_DIR, 'goals.json'),
   schedule: path.join(ZHIGUI_DIR, 'schedule.json'),
   errands: path.join(ZHIGUI_DIR, 'errands.json'),
   notes: path.join(ZHIGUI_DIR, 'notes.json'),
+  decisions: path.join(ZHIGUI_DIR, 'decisions.json'),
+  activity: path.join(ZHIGUI_DIR, 'activity.json'),
   reminders: path.join(ZHIGUI_DIR, 'reminders.json'),
   userProfile: path.join(ZHIGUI_DIR, 'userProfile.json'),
-};
-
-const DOCUMENT_KEYS = {
-  goals: ['strategicGoals', 'currentGoals', 'constraints'],
-  schedule: ['schedule', 'morningBriefing', 'conflicts', 'briefings'],
-  errands: ['errands'],
-  notes: ['notes'],
-  userProfile: ['userProfile'],
 };
 
 // P0 FIX: Use unified Storage.readFullState() (hierarchy primary) instead of
@@ -74,42 +68,14 @@ function buildDashboardState() {
   try {
     topicIndex = getBrainIndex().getTopics().map(topic => ({ id: topic.id, label: topic.label }));
   } catch {}
-  return { ...state, topicIndex };
-}
 
-// P0 FIX: Use unified Storage.writeState() which writes to hierarchy + flat files + state.json.
-// This ensures Dashboard edits are visible to AI and Electron.
-function writeMergedState(state) {
-  return Storage.writeState(state);
-}
-
-// Update document index timestamp (first layer of two-layer retrieval)
-function updateIndexTimestamp(docType) {
-  try {
-    const idx = readJson(INDEX_FILE);
-    if (idx && idx.documents) {
-      const doc = idx.documents.find(d => d.type === docType);
-      if (doc) {
-        doc.lastUpdated = new Date().toISOString();
-        try { doc.size = fs.statSync(DOCUMENT_FILES[docType]).size; } catch {}
-      }
-      idx.meta.lastUpdated = new Date().toISOString();
-      writeJson(INDEX_FILE, idx);
-    }
-  } catch {}
+  return createDashboardState(state, topicIndex);
 }
 
 // Ensure document index exists, initialize if not
 function ensureIndex() {
   const existing = readJson(INDEX_FILE);
   if (existing && existing.documents) {
-    const filtered = existing.documents.filter(doc => doc.type !== 'decisions');
-    if (filtered.length !== existing.documents.length) {
-      existing.documents = filtered;
-      existing.meta = existing.meta || {};
-      existing.meta.lastUpdated = new Date().toISOString();
-      writeJson(INDEX_FILE, existing);
-    }
     return existing;
   }
   const idx = {
@@ -122,12 +88,14 @@ function ensureIndex() {
       { type: 'goals', title: 'Goals and Constraints', description: 'Strategic goals, current goals, constraints', lastUpdated: new Date().toISOString(), size: 0 },
       { type: 'schedule', title: 'Schedule and Briefing', description: 'Schedule, daily briefing, conflict detection', lastUpdated: new Date().toISOString(), size: 0 },
       { type: 'errands', title: 'Errands', description: 'must/should/nice three-level errands', lastUpdated: new Date().toISOString(), size: 0 },
-      { type: 'notes', title: 'Life Notes', description: 'AI-authored title index with on-demand details', lastUpdated: new Date().toISOString(), size: 0 },
+      { type: 'notes', title: 'Notes', description: 'AI-authored title index with on-demand details', lastUpdated: new Date().toISOString(), size: 0 },
+      { type: 'decisions', title: 'Decisions', description: 'Structured decisions and outcomes', lastUpdated: new Date().toISOString(), size: 0 },
+      { type: 'activity', title: 'Activity', description: 'Compact cross-conversation change journal', lastUpdated: new Date().toISOString(), size: 0 },
       { type: 'reminders', title: 'Reminders', description: 'Scheduled time-point reminders and event-driven reminders', lastUpdated: new Date().toISOString(), size: 0 },
       { type: 'userProfile', title: 'User Profile', description: 'User profile, values, communication preferences', lastUpdated: new Date().toISOString(), size: 0 },
     ]
   };
-  writeJson(INDEX_FILE, idx);
+  Storage.writeJsonAtomic(INDEX_FILE, idx);
   return idx;
 }
 
@@ -166,24 +134,28 @@ const SHARED_ACTION_ROUTES = {
   '/api/task/update': 'task.update',
   '/api/task/delete': 'task.delete',
   '/api/task/unlock': 'task.unlock',
-  '/api/priority/update': 'priority.update',
-  '/api/priority/unlock': 'priority.unlock',
   '/api/event/add': 'event.add',
   '/api/goal/add': 'goal.add',
   '/api/goal/complete': 'goal.complete',
   '/api/delete-goal': 'goal.delete',
   '/api/errand/add': 'errand.add',
   '/api/errand/complete': 'errand.complete',
+  '/api/errand/undo': 'errand.undo',
   '/api/errand/update': 'errand.update',
   '/api/errand/delete': 'errand.delete',
   '/api/note/add': 'note.add',
   '/api/note/delete': 'note.delete',
   '/api/note/update': 'note.update',
-  '/api/review/resolve': 'review.resolve',
   '/api/weights/update': 'weights.update',
+  '/api/reminder/update': 'reminder.update',
   '/api/reminder/delete': 'reminder.delete',
   '/api/theme': 'theme.set',
   '/api/lang': 'lang.set',
+  '/api/decision/add': 'decision.add',
+  '/api/decision/update': 'decision.update',
+  '/api/decision/delete': 'decision.delete',
+  '/api/decision/get': 'decision.get',
+  '/api/delete/preview': 'deletion.preview',
 };
 
 async function handleSharedAction(req, res, action) {
@@ -192,8 +164,12 @@ async function handleSharedAction(req, res, action) {
     // P0-7.1: reject malformed/injectable input before it reaches the Actions engine.
     sanitizeSharedPayload(payload);
     const result = Actions.execute(action, payload);
-    const timestamp = new Date().toISOString();
-    pushSSE({ type: action === 'theme.set' ? 'theme_update' : 'state_update', theme: result.theme, timestamp });
+    // Previews are read-only.  Do not make every connected panel re-fetch its
+    // full index merely because the user opened a deletion confirmation.
+    if (action !== 'deletion.preview') {
+      const timestamp = new Date().toISOString();
+      pushSSE({ type: action === 'theme.set' ? 'theme_update' : 'state_update', theme: result.theme, timestamp });
+    }
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(result));
   } catch (err) {
@@ -229,9 +205,10 @@ function readJson(filePath) {
   }
 }
 
-// Utility: write JSON file
+// Utility: use the shared recoverable write path for dashboard-owned history
+// and compatibility index files.
 function writeJson(filePath, data) {
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+  Storage.writeJsonAtomic(filePath, data);
 }
 
 // Push message to all SSE clients
@@ -264,7 +241,7 @@ function parseBody(req) {
     });
     req.on('end', () => {
       try { resolve(JSON.parse(body || '{}')); }
-      catch (e) { resolve({}); }
+      catch (e) { reject(new Error('Invalid JSON in request body')); }
     });
     req.on('error', reject);
   });
@@ -292,14 +269,14 @@ function validateId(value, fieldName) {
 }
 
 // Validate a free-text field. null/undefined are normalized to '' (optional fields).
-// Throws ValidationError if the value is not a string or its length is >= maxLength.
+// Throws ValidationError if the value is not a string or its length exceeds maxLength.
 function validateText(value, fieldName, maxLength) {
   if (value === undefined || value === null) return '';
   if (typeof value !== 'string') {
     throw new ValidationError(`${fieldName} must be a string`);
   }
-  if (value.length >= maxLength) {
-    throw new ValidationError(`${fieldName} is too long (max ${maxLength - 1} chars)`);
+  if (value.length > maxLength) {
+    throw new ValidationError(`${fieldName} is too long (max ${maxLength} chars)`);
   }
   return value;
 }
@@ -377,30 +354,13 @@ function handleGetHistory(res) {
   res.end(JSON.stringify(history));
 }
 
-// POST /api/state - Write complete state (used by Agent)
-async function handlePostState(req, res) {
-  const body = await parseBody(req);
-  if (!body || typeof body !== 'object') {
-    res.writeHead(400, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Invalid state data' }));
-    return;
-  }
-  body.meta = body.meta || {};
-  body.meta.lastUpdated = new Date().toISOString();
-  writeMergedState(body);
-  pushSSE({ type: 'state_update', timestamp: body.meta.lastUpdated });
-  res.writeHead(200, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({ success: true }));
-}
-
 // POST /api/history - Append history record (used by Agent)
 async function handlePostHistory(req, res) {
   const body = await parseBody(req);
   // P0-7.1: validate text fields
   validateText(body.userMessage, 'userMessage', 100000);
   validateText(body.aiResponse, 'aiResponse', 100000);
-  const history = readJson(HISTORY_FILE) || { conversations: [], meta: {} };
-  
+
   const entry = {
     id: genId('conv'),
     timestamp: new Date().toISOString(),
@@ -408,14 +368,18 @@ async function handlePostHistory(req, res) {
     aiResponse: body.aiResponse || '',
     extracted: body.extracted || {}
   };
-  
-  history.conversations = history.conversations || [];
-  history.conversations.push(entry);
-  history.meta = history.meta || {};
-  history.meta.totalConversations = history.conversations.length;
-  history.meta.lastConversation = entry.timestamp;
-  
-  writeJson(HISTORY_FILE, history);
+
+  // P0-0.4: Use Storage lock to prevent concurrent write race
+  Storage.withLock('history', () => {
+    const history = readJson(HISTORY_FILE) || { conversations: [], meta: {} };
+    history.conversations = history.conversations || [];
+    history.conversations.push(entry);
+    history.meta = history.meta || {};
+    history.meta.totalConversations = history.conversations.length;
+    history.meta.lastConversation = entry.timestamp;
+    writeJson(HISTORY_FILE, history);
+  });
+
   pushSSE({ type: 'history_update', timestamp: entry.timestamp });
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ success: true, id: entry.id }));
@@ -461,16 +425,53 @@ function handleGetTopic(req, res, queryParams) {
   validateId(topicId, 'topicId');
   try {
     const brain = getBrainIndex();
-    const doc = brain.getTopicDocument(topicId);
+    // A topic panel needs the owned note titles, but never their bodies.  Full
+    // content remains behind the one-note endpoint used after an explicit open.
+    const doc = brain.getTopicDocument(topicId, { includeNotes: true });
     if (!doc) {
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Topic not found' }));
       return;
     }
+    const notes = (doc.notes || []).map(note => ({
+      id: note.id,
+      title: note.title || null,
+      createdAt: note.createdAt || null,
+      relatedDate: note.relatedDate || null,
+      relatedTime: note.relatedTime || null,
+      domain: note.domain || null,
+      source: note.source || null,
+      needsEnrichment: !!note.needsEnrichment,
+    }));
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ...doc, noteCount: (doc.notes || []).length }));
+    res.end(JSON.stringify({ ...doc, notes, noteCount: notes.length }));
   } catch (e) {
     res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: e.message }));
+  }
+}
+
+// GET /api/note?noteId=xxx - one full note body, loaded only after the user
+// expands that card in the panel.
+function handleGetNote(res, queryParams) {
+  const noteId = queryParams.get('noteId');
+  if (!noteId) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Missing noteId' }));
+    return;
+  }
+  try {
+    validateId(noteId, 'noteId');
+    const note = Storage.getNoteDetail(noteId);
+    if (!note) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Note not found' }));
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ note }));
+  } catch (e) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: e.message }));
   }
 }
@@ -513,10 +514,10 @@ async function handleDeleteTopic(req, res) {
   validateId(topicId, 'topicId');
   if (confirm !== true) {
     try {
-      const brain = getBrainIndex();
-      // Return the FULL cascade manifest (what WILL be deleted) so the panel can render a
-      // confirmation checklist. Shape matches dashboard's preview.counts / preview.manifest.
-      const dry = brain.cascadeDelete(topicId, { dryRun: true });
+      // Topic ownership and cross-reference cleanup live in Actions.  A topic
+      // may be linked to actions that use notes from several topics, so the
+      // preview must distinguish deleted notes from preserved actions.
+      const dry = Actions.execute('topic.preview_delete', { topicId });
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(dry));
     } catch (e) {
@@ -526,8 +527,7 @@ async function handleDeleteTopic(req, res) {
     return;
   }
   try {
-    const brain = getBrainIndex();
-    const result = brain.cascadeDelete(topicId);
+    const result = Actions.execute('topic.delete', { topicId, confirm: true });
     pushSSE({ type: 'topics_update', timestamp: new Date().toISOString() });
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(result));
@@ -677,7 +677,10 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/api/state' && req.method === 'GET') {
       handleGetState(res);
     } else if (pathname === '/api/state' && req.method === 'POST') {
-      await handlePostState(req, res);
+      // Whole-state replacement bypasses entity validation and can overwrite
+      // unrelated edits. All mutations now use SHARED_ACTION_ROUTES.
+      res.writeHead(410, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Full-state replacement is retired; use an entity action.' }));
     } else if (pathname === '/api/history' && req.method === 'GET') {
       handleGetHistory(res);
     } else if (pathname === '/api/history' && req.method === 'POST') {
@@ -690,6 +693,8 @@ const server = http.createServer(async (req, res) => {
       handleGetTopics(res);
     } else if (pathname === '/api/topic' && req.method === 'GET') {
       handleGetTopic(req, res, url.searchParams);
+    } else if (pathname === '/api/note' && req.method === 'GET') {
+      handleGetNote(res, url.searchParams);
     } else if (pathname === '/api/associated' && req.method === 'GET') {
       handleSearchAssociated(req, res, url.searchParams);
     } else if (pathname === '/api/search' && req.method === 'GET') {
@@ -745,7 +750,7 @@ function setupFileWatcher() {
   }
 }
 
-server.listen(PORT, () => {
+server.listen(PORT, HOST, () => {
   console.log('');
   console.log('  ╔══════════════════════════════════════╗');
   console.log('  ║     ZhiGui · AI Schedule Dashboard    ║');

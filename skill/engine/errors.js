@@ -23,6 +23,9 @@ class ZhiGuiError extends Error {
     this.name = 'ZhiGuiError';
     this.code = code;
     this.details = details;
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, ZhiGuiError);
+    }
   }
 
   toJSON() {

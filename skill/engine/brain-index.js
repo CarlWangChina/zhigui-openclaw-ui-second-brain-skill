@@ -10,9 +10,9 @@
  *  2) User-confirmed precipitation (document detachment): when the AI decides a topic
  *     has grown large enough, it proposes extracting that topic's notes from notes.json
  *     into a standalone topics/<id>.json file. The extraction only happens after the user
- *     accepts the proposal in the review queue.
- *  3) One-click cascade delete (foreign-key-like): deleting a topic automatically deletes all
- *     its associated goals/schedule tasks/errands/notes, leaving no orphan data.
+ *     accepts the proposal in conversation (the tool is called with userConfirmed: true).
+ *  3) Safe topic deletion: deleting a topic removes only notes owned by that
+ *     topic and detaches surviving plans from its retrieval metadata.
  *  4) Association search (JOIN-like): given a topic, return all associated entities; global
  *     search aggregates across stores.
  *
@@ -36,6 +36,39 @@ function slug(label) {
   return 't_' + hex;
 }
 
+// A dependency-free relevance fallback for conversation-triggered retrieval.
+// It does not classify or mutate records; it only lets a mixed Chinese/English
+// user query match individual concepts when the entire sentence is not a
+// literal substring of a stored note.
+function retrievalTerms(query) {
+  const text = String(query || '').toLowerCase().trim();
+  const terms = new Set((text.match(/[\p{L}\p{N}_-]{2,}/gu) || []));
+  const han = [...text].filter(char => /\p{Script=Han}/u.test(char));
+  for (let index = 0; index < han.length - 1; index++) terms.add(han.slice(index, index + 2).join(''));
+  return [...terms];
+}
+
+function relevanceScore(terms, value) {
+  const text = String(value || '').toLowerCase();
+  if (!text) return 0;
+  return terms.reduce((score, term) => score + (text.includes(term) ? term.length : 0), 0);
+}
+
+function searchSnippet(value, query, max = 180) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  const lower = text.toLowerCase();
+  const at = lower.indexOf(String(query || '').toLowerCase());
+  if (at < 0 || text.length <= max) return text.slice(0, max);
+  const start = Math.max(0, at - Math.floor(max / 3));
+  const prefix = start > 0 ? '…' : '';
+  const remaining = Math.max(1, max - prefix.length);
+  const provisionalEnd = Math.min(text.length, start + remaining);
+  const suffix = provisionalEnd < text.length ? '…' : '';
+  const end = Math.min(text.length, start + Math.max(1, remaining - suffix.length));
+  return `${prefix}${text.slice(start, end)}${end < text.length ? '…' : ''}`;
+}
+
 class BrainIndex {
   constructor(dataDir) {
     this.dir = dataDir;
@@ -45,6 +78,7 @@ class BrainIndex {
       goals: path.join(dataDir, 'goals.json'),
       schedule: path.join(dataDir, 'schedule.json'),
       errands: path.join(dataDir, 'errands.json'),
+      decisions: path.join(dataDir, 'decisions.json'),
       userProfile: path.join(dataDir, 'userProfile.json'),
       index: path.join(dataDir, 'index.json'),
       library: path.join(dataDir, 'library.json'),
@@ -74,10 +108,7 @@ class BrainIndex {
   }
 
   _writeLibrary(library) {
-    try {
-      fs.writeFileSync(this.files.library, JSON.stringify(library, null, 2), 'utf8');
-      return true;
-    } catch { return false; }
+    return this._write(this.files.library, library);
   }
 
   // Get the full library structure (for AI and dashboard)
@@ -102,65 +133,6 @@ class BrainIndex {
       }
       this._writeLibrary(library);
     }
-  }
-
-  // Update library (add/modify categories and topics) — called by zhigui_update_library
-  updateLibrary(changes) {
-    const library = this._readLibrary();
-    const stats = { categoriesAdded: 0, topicsAdded: 0, topicsUpdated: 0 };
-
-    // Add/update categories
-    if (changes.categories) {
-      for (const [name, data] of Object.entries(changes.categories)) {
-        if (!library.categories[name]) {
-          library.categories[name] = { icon: data.icon || '📁', topics: data.topics || [] };
-          stats.categoriesAdded++;
-        } else {
-          if (data.icon) library.categories[name].icon = data.icon;
-          if (data.topics) library.categories[name].topics = data.topics;
-        }
-      }
-    }
-
-    // Add/update topics
-    if (changes.topics) {
-      for (const [label, data] of Object.entries(changes.topics)) {
-        if (!library.topics[label]) {
-          library.topics[label] = {
-            keywords: data.keywords || [],
-            category: data.category || null,
-            builtIn: false,
-            createdAt: ts(),
-          };
-          // Add to category
-          const cat = library.topics[label].category;
-          if (cat) {
-            if (!library.categories[cat]) library.categories[cat] = { icon: '📁', topics: [] };
-            if (!library.categories[cat].topics.includes(label)) library.categories[cat].topics.push(label);
-          }
-          stats.topicsAdded++;
-        } else {
-          if (data.keywords) library.topics[label].keywords = data.keywords;
-          if (data.category) {
-            // Remove from old category
-            const oldCat = library.topics[label].category;
-            if (library.categories[oldCat]) {
-              library.categories[oldCat].topics = library.categories[oldCat].topics.filter(t => t !== label);
-            }
-            library.topics[label].category = data.category;
-            // Add to new category
-            if (!library.categories[data.category]) library.categories[data.category] = { icon: '📁', topics: [] };
-            if (!library.categories[data.category].topics.includes(label)) {
-              library.categories[data.category].topics.push(label);
-            }
-          }
-          stats.topicsUpdated++;
-        }
-      }
-    }
-
-    this._writeLibrary(library);
-    return { success: true, stats, library };
   }
 
   // -- Low-level IO --
@@ -203,12 +175,13 @@ class BrainIndex {
       // Use file lock to prevent concurrent writes (solves B, C)
       const Storage = require('./storage');
       const result = Storage.withLock('brain-index', () => {
-        fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf8');
+        Storage.writeJsonAtomic(p, data);
         return true;
       });
-      // After writing split documents, sync to state.json so Electron reads fresh data.
-      // Isolated try-catch: failure here must NOT prevent the primary file write.
-      try { Storage.syncStateJson(); } catch {}
+      // state.json is owned exclusively by Storage.writeState; the brain-index
+      // writer only flushes index.json / topics/*.json, so no side-channel
+      // syncStateJson() is needed here. Calling it would race with writeState
+      // (unlocked write to the same state.json) — see audit P2.
       return result;
     } catch { return false; }
   }
@@ -228,7 +201,7 @@ class BrainIndex {
   _writeIndex(idx) {
     idx.meta = idx.meta || {};
     idx.meta.lastUpdated = ts();
-    this._write(this.files.index, idx);
+    return this._write(this.files.index, idx);
   }
 
   // -- Topic detection and creation --
@@ -279,11 +252,15 @@ class BrainIndex {
   ensureTopic(label, { domain = 'misc', category = null, keywords = [] } = {}) {
     if (!label) return null;
     const idx = this._readIndex();
-    const existing = Object.values(idx.topics).find(t => t.label === label);
-    if (existing) {
+    const id = slug(label);
+    // ID collision guard: same label → same slug → same ID. If a topic with
+    // this ID already exists, return it instead of overwriting. This is NOT
+    // fuzzy matching — the AI decides reuse via topicId; this only prevents
+    // data loss when the same label is passed twice.
+    if (idx.topics[id]) {
+      const existing = idx.topics[id];
       const set = new Set([...(existing.keywords || []), ...keywords]);
       existing.keywords = [...set];
-      // Update category if AI provides a new one (AI's latest judgment takes priority)
       if (category && category !== existing.category) {
         this._updateCategoryCount(idx, existing.category, -1);
         existing.category = category;
@@ -293,7 +270,24 @@ class BrainIndex {
       this._writeIndex(idx);
       return existing.id;
     }
-    const id = slug(label);
+    // Normalize matching (secondary check): trim + case-insensitive.
+    // Catches "English" vs "english" or " 考研 " vs "考研" that slug()
+    // misses because UTF-8 hex encoding is case-sensitive.
+    const normalizedLabel = label.trim().toLowerCase();
+    for (const existing of Object.values(idx.topics)) {
+      if ((existing.label || '').trim().toLowerCase() === normalizedLabel) {
+        const set = new Set([...(existing.keywords || []), ...keywords]);
+        existing.keywords = [...set];
+        if (category && category !== existing.category) {
+          this._updateCategoryCount(idx, existing.category, -1);
+          existing.category = category;
+          this._updateCategoryCount(idx, category, 1);
+        }
+        existing.updatedAt = ts();
+        this._writeIndex(idx);
+        return existing.id;
+      }
+    }
     const effectiveCategory = category || null;
     idx.topics[id] = {
       id,
@@ -369,6 +363,58 @@ class BrainIndex {
       }
     }
     this._writeIndex(idx);
+  }
+
+  // Remove topics that no longer have any related notes, goals or action items,
+  // and prune empty categories from both index.json and library.json so that
+  // deleting the last note of a topic does not leave phantom categories behind.
+  cleanupEmptyTopics() {
+    const idx = this._readIndex();
+    const emptyTopicIds = [];
+    for (const [topicId, topic] of Object.entries(idx.topics || {})) {
+      const notes = topic.related?.notes || [];
+      const goals = topic.related?.goals || [];
+      const actionItems = topic.related?.actionItems || [];
+      if (notes.length === 0 && goals.length === 0 && actionItems.length === 0) {
+        emptyTopicIds.push(topicId);
+      }
+    }
+    for (const topicId of emptyTopicIds) {
+      this.deleteTopicMetadata(topicId);
+    }
+
+    // Consistency sweep: remove library topics whose label no longer exists in
+    // the index, and drop empty library/index categories.
+    const lib = this._readLibrary();
+    const activeLabels = new Set(Object.values(idx.topics || {}).map(t => t.label).filter(Boolean));
+    let libraryDirty = false;
+    for (const label of Object.keys(lib.topics || {})) {
+      if (!activeLabels.has(label)) {
+        delete lib.topics[label];
+        libraryDirty = true;
+      }
+    }
+    for (const [catName, cat] of Object.entries(lib.categories || {})) {
+      if (!Array.isArray(cat.topics) || cat.topics.length === 0) {
+        delete lib.categories[catName];
+        libraryDirty = true;
+      }
+    }
+    if (libraryDirty) this._writeLibrary(lib);
+
+    const finalIdx = this._readIndex();
+    if (finalIdx.categories) {
+      let indexDirty = false;
+      for (const [name, c] of Object.entries(finalIdx.categories)) {
+        if (!c.topicCount || c.topicCount === 0) {
+          delete finalIdx.categories[name];
+          indexDirty = true;
+        }
+      }
+      if (indexDirty) this._writeIndex(finalIdx);
+    }
+
+    return emptyTopicIds.length;
   }
 
   // Recount a topic from its foreign-key associations. Note bodies remain canonical in
@@ -450,54 +496,174 @@ class BrainIndex {
     this._writeIndex(idx);
   }
 
-  // Read a topic document on demand (only loads that topic, saving tokens)
-  getTopicDocument(topicId) {
+  /**
+   * Get the compressed Working Context for a topic.
+   * This is Layer 2 Knowledge Engine output — NOT a raw note list.
+   * AI reads this compressed context instead of individual notes.
+   *
+   * @param {string} topicId - Topic ID
+   * @param {Object} [opts]
+   * @param {boolean} [opts.includeNotes=false] - Whether to include individual note titles
+   * @returns {Object} Compressed topic document
+   */
+  getTopicDocument(topicId, opts = {}) {
+    const { includeNotes = false } = opts;
     const idx = this._readIndex();
     const t = idx.topics[topicId];
     if (!t) return null;
+
+    // ---- Collect all notes linked to this topic ----
     const notesDoc = this._read(this.files.notes, { notes: [] });
     const candidates = new Map();
     for (const note of (notesDoc.notes || [])) {
-      if (note && (note.topicId === topicId || (t.related?.notes || []).includes(note.id))) candidates.set(note.id, note);
+      if (note && (note.topicId === topicId || (t.related?.notes || []).includes(note.id))) {
+        candidates.set(note.id, note);
+      }
     }
-    // Read legacy precipitated files only as a recovery source; do not make them a
-    // primary store again. Storage.getNoteDetail wins whenever it is available.
+    // Read legacy precipitated files only as a recovery source
     if (t.precipitated && t.file) {
       const archive = this._read(path.join(this.dir, t.file), { notes: [] });
-      for (const note of (archive.notes || [])) if (note?.id) candidates.set(note.id, note);
+      for (const note of (archive.notes || [])) {
+        if (note?.id) candidates.set(note.id, note);
+      }
     }
-    const notes = [...candidates.values()].map(note => Storage.getNoteDetail(note.id) || note);
-    return { topicId, label: t.label, keywords: t.keywords || [], domain: t.domain || 'misc', precipitated: false, notes };
+    // Enrich notes via Storage.getNoteDetail when available
+    const allNotes = [...candidates.values()].map(note => Storage.getNoteDetail(note.id) || note);
+
+    // ---- Collect goals linked to this topic ----
+    const goalIds = new Set(t.related?.goals || []);
+    const goalsDoc = this._read(this.files.goals, {});
+    const linkedGoals = [];
+    for (const key of ['strategicGoals', 'currentGoals', 'constraints']) {
+      for (const g of (goalsDoc[key] || [])) {
+        if (goalIds.has(g.id)) {
+          const deadline = g.deadline ? new Date(g.deadline) : null;
+          const now = new Date();
+          const daysLeft = deadline ? Math.ceil((deadline - now) / 86400000) : null;
+          linkedGoals.push({
+            id: g.id,
+            title: g.title,
+            deadline: g.deadline || null,
+            daysLeft,
+          });
+        }
+      }
+    }
+
+    // ---- Collect decisions & completedActions from state.json ----
+    const stateFile = path.join(this.dir, 'state.json');
+    let state = {};
+    try { state = JSON.parse(fs.readFileSync(stateFile, 'utf-8')) || {}; } catch {}
+
+    const allDecisions = state.decisions || [];
+    const topicNoteIds = new Set(allNotes.map(n => n.id));
+    const linkedDecisions = allDecisions
+      .filter(d => d.topicId === topicId || (d.noteId && topicNoteIds.has(d.noteId)))
+      .map(d => ({
+        id: d.id,
+        title: d.title || d.summary || 'Untitled decision',
+        status: d.status || 'pending',
+        createdAt: d.createdAt || null,
+      }));
+
+    const allCompleted = state.completedActions || [];
+    const topicActionIds = new Set([
+      ...(t.related?.actionItems || []),
+      ...(t.related?.tasks || []),
+      ...(t.related?.errands || []),
+    ]);
+    const recentCompleted = allCompleted
+      .filter(a => topicActionIds.has(a.id) || a.topicId === topicId)
+      .sort((a, b) => new Date(b.completedAt || 0) - new Date(a.completedAt || 0))
+      .slice(0, 5)
+      .map(a => ({ id: a.id, title: a.title, completedAt: a.completedAt }));
+
+    // ---- Aggregate stats ----
+    const actionItemCount = topicActionIds.size;
+
+    // ---- Recent notes (last 5 by createdAt) ----
+    const recentNotes = [...allNotes]
+      .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+      .slice(0, 5)
+      .map(n => ({
+        id: n.id,
+        title: n.title || 'Untitled',
+        createdAt: n.createdAt || null,
+      }));
+
+    // ---- Evidence: open questions & risks ----
+    const openQuestions = [];
+    const risks = [];
+    for (const n of allNotes) {
+      if (n.signal === 'question' || n.needsEnrichment) {
+        openQuestions.push(n.title || n.content || 'Untitled question');
+      }
+      if (n.signal === 'risk' || n.health === 'health_negative') {
+        risks.push(n.title || n.content || 'Untitled risk');
+      }
+    }
+
+    // ---- Compressed working context summary (engine-generated, not AI) ----
+    const goalSummary = linkedGoals.length > 0
+      ? linkedGoals.map(g => `${g.title}${g.daysLeft !== null ? ` (${g.daysLeft}d left)` : ''}`).join(', ')
+      : 'No linked goals';
+    const decisionSummary = linkedDecisions.length > 0
+      ? linkedDecisions.filter(d => d.status === 'pending').length + ' pending'
+      : 'No linked decisions';
+    const riskSummary = risks.length > 0 ? risks.join('; ') : 'No known risks';
+    const questionSummary = openQuestions.length > 0 ? openQuestions.join('; ') : 'No open questions';
+
+    const workingContext = [
+      `Topic: ${t.label} [${t.domain || 'misc'}]`,
+      `${allNotes.length} notes, ${linkedGoals.length} goals, ${actionItemCount} actions, ${linkedDecisions.length} decisions.`,
+      `Goals: ${goalSummary}`,
+      `Decisions: ${decisionSummary}`,
+      `Risks: ${riskSummary}`,
+      `Questions: ${questionSummary}`,
+    ].join(' | ');
+
+    // ---- Build result ----
+    const result = {
+      id: topicId,
+      label: t.label,
+      domain: t.domain || 'misc',
+      category: t.category || 'Other',
+
+      // Aggregation: counts by entity type
+      stats: {
+        noteCount: allNotes.length,
+        goalCount: linkedGoals.length,
+        actionItemCount,
+        decisionCount: linkedDecisions.length,
+      },
+
+      // Summarization: what changed recently
+      recentNotes,
+      recentActions: recentCompleted,
+
+      // Compression: key entities linked to this topic
+      relatedGoals: linkedGoals,
+      relatedDecisions: linkedDecisions,
+
+      // Evidence
+      openQuestions,
+      risks,
+
+      // Compressed working context summary
+      workingContext,
+    };
+
+    // Backward compatibility: callers that expect .notes still get them
+    if (includeNotes) {
+      result.notes = allNotes;
+    }
+
+    return result;
   }
 
   getTopics() {
     const idx = this._readIndex();
     const dynamic = Object.values(idx.topics);
-
-    // Merge built-in library topics so the Library view is never empty on fresh start
-    let builtIn = [];
-    try {
-      const libPath = path.join(this.dir, 'library.json');
-      if (fs.existsSync(libPath)) {
-        const lib = JSON.parse(fs.readFileSync(libPath, 'utf-8'));
-        // Only surface library seeds whose label is NOT already an existing (dynamic) topic,
-        // otherwise the same topic would appear twice (once as dynamic, once as built-in).
-        builtIn = Object.entries(lib.topics || {})
-          .filter(([label]) => !dynamic.some(t => t.label === label))
-          .map(([label, data]) => ({
-            id: null, // built-in topics have no index id until activated
-            label,
-            domain: 'misc',
-            category: data.category || 'Other',
-            keywords: data.keywords || [],
-            noteCount: 0,
-            precipitated: false,
-            file: null,
-            builtIn: true,
-            relatedCounts: { notes: 0, goals: 0, actionItems: 0 },
-          }));
-      }
-    } catch {}
 
     // Errands (life to-dos) and goal-derived tasks share the unified `actionItems` bucket in
     // the index, so to show 琐事 as a distinct group we distinguish them by membership in
@@ -516,7 +682,9 @@ class BrainIndex {
       }
     } catch {}
 
-    return [...dynamic, ...builtIn]
+    // library.json is a vocabulary/template store, not a user Topic source. A live
+    // topic must always have a real id so preview and deletion are reliable.
+    return dynamic
       .map(t => {
         const actionItems = (t.related?.actionItems || []).concat(t.related?.tasks || [], t.related?.errands || []);
         const confirmedNotes = (t.related?.notes || []).filter(noteId => !pendingNoteIds.has(noteId));
@@ -551,185 +719,57 @@ class BrainIndex {
   // "preview → confirm" requirement for cascade deletes.
   // Action items (goal-derived tasks) are deleted by actionItemIds OR by reverse-lookup on
   // relatedGoalId/relatedStrategicGoalId (orphan tasks whose goal was deleted are removed too).
-  cascadeDelete(topicId, opts = {}) {
-    const dryRun = !!(opts && opts.dryRun);
-    // P0-2.2: Stale data detection — record notes.json mtime before reading.
-    const startMtime = this._statMtime(this.files.notes);
+  /**
+   * Remove only the topic's retrieval metadata. Entity ownership is handled by
+   * the canonical Actions layer, which can clean cross-document references in
+   * one state transaction before it calls this helper.
+   */
+  deleteTopicMetadata(topicId) {
     const idx = this._readIndex();
-    const t = idx.topics[topicId];
-    if (!t) return { error: 'topic not found', topicId };
-
-    const rel = t.related || {};
-    // Tasks and errands share the unified actionItems bucket (reference only; the underlying
-    // schedule.json tasks and errands.json files stay separate). Tolerate legacy tasks/errands keys.
-    const actionItemIds = [...new Set([...(rel.actionItems || []), ...(rel.tasks || []), ...(rel.errands || [])])];
-    const manifest = {
-      label: t.label,
-      goals: [],
-      actionItems: [],
-      notes: [],
+    const topic = idx.topics?.[topicId];
+    if (!topic) return { success: false, error: 'topic not found', topicId };
+    const originalIndex = JSON.parse(JSON.stringify(idx));
+    const lib = this._readLibrary();
+    const originalLibrary = lib ? JSON.parse(JSON.stringify(lib)) : null;
+    const rollback = (error) => {
+      // Metadata is secondary, but it must not claim a topic was removed when
+      // the canonical state transaction was aborted. Best-effort rollback
+      // keeps the two views aligned and still makes a write error visible.
+      this._writeIndex(originalIndex);
+      if (originalLibrary) this._writeLibrary(originalLibrary);
+      return { success: false, error: error.message || String(error), topicId };
     };
-
-    // 1) Goals — collect deleted ids for orphan-task reverse lookup
-    const g = this._read(this.files.goals, {});
-    const deletedGoalIds = new Set();
-    for (const key of ['strategicGoals', 'currentGoals', 'constraints']) {
-      if (!g[key]) continue;
-      for (const x of g[key]) {
-        if ((rel.goals || []).includes(x.id)) {
-          manifest.goals.push({ id: x.id, title: x.title || x.id, type: key });
-          deletedGoalIds.add(x.id);
-        }
-      }
-    }
-
-    // 2) Schedule tasks (goal-derived action items) — actionItemIds OR orphaned via relatedGoalId
-    const sch = this._read(this.files.schedule, { days: {} });
-    for (const day of Object.values(sch.days || {})) {
-      if (!day.tasks) continue;
-      for (const tk of day.tasks) {
-        if (actionItemIds.includes(tk.id) ||
-            (tk.relatedGoalId && deletedGoalIds.has(tk.relatedGoalId)) ||
-            (tk.relatedStrategicGoalId && deletedGoalIds.has(tk.relatedStrategicGoalId))) {
-          manifest.actionItems.push({
-            id: tk.id,
-            kind: 'task',
-            title: tk.title || tk.id,
-            date: day.date,
-            relatedGoalId: tk.relatedGoalId || null,
-          });
-        }
-      }
-    }
-
-    // 3) Errands (life to-dos not bound to goals) — also land in the actionItems bucket
-    const er = this._read(this.files.errands, { errands: [] });
-    for (const e of (er.errands || [])) {
-      if (actionItemIds.includes(e.id)) {
-        manifest.actionItems.push({ id: e.id, kind: 'errand', title: e.title || e.id, priority: e.priority });
-      }
-    }
-
-    // 5) Notes (precipitated file + leftovers in notes.json)
-    const notesDoc = this._read(this.files.notes, { notes: [] });
-    for (const n of (notesDoc.notes || [])) {
-      if ((rel.notes || []).includes(n.id) || n.topicId === topicId) {
-        manifest.notes.push({ id: n.id, title: n.title || '待 AI 归纳', domain: n.domain || 'misc', needsEnrichment: n.needsEnrichment === true });
-      }
-    }
-    if (t.precipitated && t.file) {
-      try {
-        const tf = this._read(path.join(this.dir, t.file), { notes: [] });
-        for (const n of (tf.notes || [])) {
-          manifest.notes.push({ id: n.id, title: n.title || '待 AI 归纳', domain: n.domain || 'misc', needsEnrichment: n.needsEnrichment === true, precipitated: true });
-        }
-      } catch {}
-    }
-
-    if (dryRun) {
-      const counts = {
-        goals: manifest.goals.length,
-        actionItems: manifest.actionItems.length,
-        notes: manifest.notes.length,
-        topicFile: !!(t.precipitated && t.file),
-      };
-      return { aborted: true, preview: true, topicId, label: t.label, counts, manifest };
-    }
-
-    // P0-2.2: If notes.json changed during the read-recompute window, abort the
-    // deletion — the manifest was built from stale data and deleting based on it
-    // could remove the wrong entities or miss new ones.
-    this._checkStale(this.files.notes, startMtime);
-
-    // ---- Actual deletion (only when NOT dryRun) ----
-    // 1) Goals
-    for (const key of ['strategicGoals', 'currentGoals', 'constraints']) {
-      if (!g[key]) continue;
-      g[key] = g[key].filter(x => !(rel.goals || []).includes(x.id));
-    }
-    this._write(this.files.goals, g);
-
-    // 2) Schedule tasks (actionItems + orphan reverse lookup)
-    for (const day of Object.values(sch.days || {})) {
-      if (!day.tasks) continue;
-      day.tasks = day.tasks.filter(tk =>
-        !actionItemIds.includes(tk.id) &&
-        !(tk.relatedGoalId && deletedGoalIds.has(tk.relatedGoalId)) &&
-        !(tk.relatedStrategicGoalId && deletedGoalIds.has(tk.relatedStrategicGoalId))
-      );
-    }
-    this._write(this.files.schedule, sch);
-
-    // 3) Errands
-    const erBefore = (er.errands || []).length;
-    er.errands = (er.errands || []).filter(x => !actionItemIds.includes(x.id));
-    if (er.errands.length !== erBefore) this._write(this.files.errands, er);
-
-    // 5) Notes (precipitated file + leftovers in notes.json)
-    if (t.precipitated && t.file) {
-      try { fs.unlinkSync(path.join(this.dir, t.file)); } catch {}
-    }
-    notesDoc.notes = (notesDoc.notes || []).filter(n => !(rel.notes || []).includes(n.id) && n.topicId !== topicId);
-    this._write(this.files.notes, notesDoc);
-
     delete idx.topics[topicId];
-    this._writeIndex(idx);
-
-    // P1-2.6: Also remove the topic from library.json. ensureTopic() mirrors every
-    // dynamic topic into library.json, and getTopics() re-synthesizes any library
-    // seed that is NOT yet a dynamic topic as a built-in (id:null). Without this
-    // step the deleted topic would linger in the topic list forever (visible but
-    // un-deletable from the panel).
-    //
-    // Audit confirms cleanup covers ALL four residue locations:
-    //   1. library.topics[label]            — top-level topic entry
-    //   2. library.categories[].topics[]    — nested topic-label arrays
-    //   3. index.json topics[tid]           — deleted above via `delete idx.topics[topicId]`
-    //   4. index.json related foreign keys  — deleted with the topic entry (related is
-    //      a property of idx.topics[tid], so removing the topic removes its FK table)
-    //
-    // Bug fix: the category cleanup was previously gated behind
-    // `lib.topics[t.label]` existing. If a topic label appeared in a category's
-    // topics[] list but not in library.topics (data inconsistency), the nested
-    // array cleanup was silently skipped. The cleanup now runs unconditionally.
+    if (!this._writeIndex(idx)) {
+      return { success: false, error: 'Unable to persist topic index', topicId };
+    }
     try {
-      const lib = this._readLibrary();
       if (lib) {
-        // 1) Remove from library.topics (keyed by label)
-        if (lib.topics) {
-          delete lib.topics[t.label];
-        }
-        // 2) Remove from every category's topics[] array (nested array cleanup)
-        if (lib.categories) {
-          for (const cat of Object.values(lib.categories)) {
-            if (cat && Array.isArray(cat.topics)) {
-              cat.topics = cat.topics.filter(x => x !== t.label);
-            }
+        if (lib.topics) delete lib.topics[topic.label];
+        for (const category of Object.values(lib.categories || {})) {
+          if (Array.isArray(category?.topics)) {
+            category.topics = category.topics.filter(label => label !== topic.label);
           }
         }
-        this._writeLibrary(lib);
+        if (!this._writeLibrary(lib)) {
+          return rollback(new Error('Unable to persist topic library'));
+        }
       }
-    } catch (e) { /* ignore library cleanup failure */ }
-
-    // Sync flat-file changes back to hierarchy so Storage.readFullState() sees them
-    try {
-      const Storage = require('./storage');
-      Storage.syncHierarchyFromFlatFiles();
-    } catch (e) { /* ignore sync failure */ }
-
-    return {
-      success: true,
-      topicId,
-      label: t.label,
-      deleted: {
-        goals: manifest.goals.length,
-        actionItems: manifest.actionItems.length,
-        notes: manifest.notes.length,
-        topicFile: !!(t.precipitated && t.file),
-      },
-    };
+      if (topic.precipitated && topic.file) {
+        try {
+          fs.unlinkSync(path.join(this.dir, topic.file));
+        } catch (error) {
+          if (error.code !== 'ENOENT') throw error;
+        }
+      }
+      return { success: true, topicId, label: topic.label, topicFile: !!(topic.precipitated && topic.file) };
+    } catch (error) {
+      return rollback(error);
+    }
   }
 
+  // Topic deletion belongs to Actions.topic.delete (canonical cascade). The old
+  // unsafe direct cascade was removed; no stub is retained so it cannot be called.
   // Association search: returns the topic + all associated entities (SQL JOIN-like)
   findAssociated(query) {
     const idx = this._readIndex();
@@ -758,18 +798,21 @@ class BrainIndex {
       (day.tasks || []).forEach(tk => { if (actionItemIds.includes(tk.id)) actionItems.push({ id: tk.id, kind: 'task', date, title: tk.title, time: tk.time }); });
     }
     const er = this._read(this.files.errands, { errands: [] });
-    (er.errands || []).filter(x => actionItemIds.includes(x.id)).forEach(x => actionItems.push({ id: x.id, kind: 'errand', title: x.title, priority: x.priority }));
+    (er.errands || []).filter(x => actionItemIds.includes(x.id)).forEach(x => actionItems.push({ id: x.id, kind: 'errand', title: x.title, commitmentLevel: x.commitmentLevel || 'should' }));
     result.related.actionItems = actionItems;
-    const doc = this.getTopicDocument(topicId);
+    const doc = this.getTopicDocument(topicId, { includeNotes: true });
     result.related.notes = (doc && doc.notes) || [];
     return result;
   }
 
   // Global search: across topics/notes/goals/events; hits include their topic attribution
   // Fuzzy match: query "eng" matches topic "English Speaking" (case-insensitive substring)
-  search(query) {
+  search(query, { limit = 12, offset = 0 } = {}) {
     const q = (query || '').trim().toLowerCase();
-    if (!q) return { query, total: 0, hits: [] };
+    const safeLimit = Math.max(1, Math.min(Number(limit) || 12, 30));
+    const safeOffset = Math.max(0, Number(offset) || 0);
+    if (!q) return { query, total: 0, hits: [], offset: safeOffset, limit: safeLimit, hasMore: false, nextOffset: null };
+    const terms = retrievalTerms(q);
     const idx = this._readIndex();
     const hits = [];
 
@@ -784,22 +827,63 @@ class BrainIndex {
           type: 'topic',
           topicId: t.id,
           topicLabel: t.label,
-          text: t.label + (count > 0 ? ` (${count} items)` : ''),
+          title: t.label,
+          snippet: count > 0 ? `${count} linked items` : '',
           id: t.id,
         });
+      }
+    }
+    // 4) Search actionable records. A past visit, an uncompleted fixed-date
+    // event, or a decision may be the only durable clue for a later follow-up.
+    // Return compact pointers only; callers load the dated schedule/detail when
+    // they decide it is relevant.
+    const scheduleDoc = this._read(this.files.schedule, { days: {} });
+    const errandsDoc = this._read(this.files.errands, { errands: [] });
+    const decisionsDoc = this._read(this.files.decisions, { decisions: [] });
+    const actionRecords = [];
+    for (const [date, day] of Object.entries(scheduleDoc.schedule?.days || scheduleDoc.days || {})) {
+      for (const task of (day.tasks || [])) {
+        actionRecords.push({
+          type: 'task', id: task.id, title: task.title || null, date,
+          topicId: task.topicId || null, relatedGoalId: task.relatedGoalId || null,
+          snippet: searchSnippet(`${task.description || ''} ${task.contextReason || ''}`, q),
+          text: `${task.title || ''} ${task.description || ''} ${task.contextReason || ''}`,
+        });
+      }
+    }
+    for (const errand of (errandsDoc.errands || [])) {
+      actionRecords.push({
+        type: 'errand', id: errand.id, title: errand.title || null, date: errand.date || null,
+        topicId: errand.topicId || null, relatedGoalId: errand.goalId || errand.relatedGoalId || null,
+        snippet: searchSnippet(`${errand.description || ''} ${errand.contextReason || ''}`, q),
+        text: `${errand.title || ''} ${errand.description || ''} ${errand.contextReason || ''}`,
+      });
+    }
+    for (const decision of (decisionsDoc.decisions || [])) {
+      actionRecords.push({
+        type: 'decision', id: decision.id, title: decision.title || null,
+        topicId: (decision.topicIds || [])[0] || null,
+        snippet: searchSnippet(`${decision.rationale || ''} ${decision.evidence || ''}`, q),
+        text: `${decision.title || ''} ${decision.rationale || ''} ${decision.evidence || ''}`,
+      });
+    }
+    for (const record of actionRecords) {
+      if (record.text.toLowerCase().includes(q)) {
+        const { text, ...hit } = record;
+        hits.push(hit);
       }
     }
 
     // 2) Search notes (both in notes.json and in precipitated topic files)
     const notesDoc = this._read(this.files.notes, { notes: [] });
     for (const n of (notesDoc.notes || [])) {
-      if ((n.content || '').toLowerCase().includes(q)) hits.push({ type: 'note', domain: n.domain || 'misc', topicId: n.topicId, text: n.content, id: n.id });
+      if ((n.content || '').toLowerCase().includes(q)) hits.push({ type: 'note', title: n.title || null, domain: n.domain || 'misc', topicId: n.topicId, snippet: searchSnippet(n.content, q), id: n.id });
     }
     for (const t of Object.values(idx.topics)) {
       if (t.precipitated && t.file) {
         const doc = this._read(path.join(this.dir, t.file), { notes: [] });
         for (const n of (doc.notes || [])) {
-          if ((n.content || '').toLowerCase().includes(q)) hits.push({ type: 'note', domain: n.domain, topicId: t.id, topicLabel: t.label, text: n.content, id: n.id });
+          if ((n.content || '').toLowerCase().includes(q)) hits.push({ type: 'note', title: n.title || null, domain: n.domain, topicId: t.id, topicLabel: t.label, snippet: searchSnippet(n.content, q), id: n.id });
         }
       }
     }
@@ -808,7 +892,7 @@ class BrainIndex {
     for (const key of ['strategicGoals', 'currentGoals', 'constraints']) {
       for (const x of (g[key] || [])) {
         if ((x.title || '').toLowerCase().includes(q) || (x.description || '').toLowerCase().includes(q)) {
-          hits.push({ type: 'goal', subtype: key, text: x.title, id: x.id, topicId: x.topicId });
+          hits.push({ type: 'goal', subtype: key, title: x.title, snippet: searchSnippet(x.description || x.detail || '', q), id: x.id, topicId: x.topicId });
         }
       }
     }
@@ -820,7 +904,38 @@ class BrainIndex {
       seen.add(key);
       return true;
     });
-    return { query, total: unique.length, hits: unique };
+    // A natural-language question rarely appears verbatim in a note. If no
+    // literal hit exists, rank records by its individual meaningful terms.
+    if (unique.length === 0 && terms.length > 0) {
+      const ranked = [];
+      const addRanked = (hit, text) => {
+        const score = relevanceScore(terms, text);
+        if (score > 0) ranked.push({ ...hit, score });
+      };
+      for (const topic of Object.values(idx.topics)) {
+        addRanked({ type: 'topic', topicId: topic.id, topicLabel: topic.label, title: topic.label, snippet: '', id: topic.id },
+          `${topic.label || ''} ${(topic.keywords || []).join(' ')}`);
+      }
+      for (const note of (notesDoc.notes || [])) {
+        addRanked({ type: 'note', title: note.title || null, domain: note.domain || 'misc', topicId: note.topicId, snippet: searchSnippet(note.content, q), id: note.id },
+          `${note.title || ''} ${note.content || ''}`);
+      }
+      for (const goalType of ['strategicGoals', 'currentGoals', 'constraints']) {
+        for (const goal of (g[goalType] || [])) {
+          addRanked({ type: 'goal', subtype: goalType, title: goal.title, snippet: searchSnippet(goal.description || goal.detail || '', q), id: goal.id, topicId: goal.topicId },
+            `${goal.title || ''} ${goal.description || ''} ${goal.detail || ''}`);
+        }
+      }
+      for (const record of actionRecords) {
+        const { text, ...hit } = record;
+        addRanked(hit, text);
+      }
+      ranked.sort((a, b) => b.score - a.score || String(a.id).localeCompare(String(b.id)));
+      const items = ranked.slice(safeOffset, safeOffset + safeLimit).map(({ score, ...hit }) => ({ ...hit, match: 'term-ranked' }));
+      return { query, total: ranked.length, hits: items, retrieval: 'term-ranked', offset: safeOffset, limit: safeLimit, hasMore: safeOffset + items.length < ranked.length, nextOffset: safeOffset + items.length < ranked.length ? safeOffset + items.length : null };
+    }
+    const items = unique.slice(safeOffset, safeOffset + safeLimit);
+    return { query, total: unique.length, hits: items, retrieval: 'literal', offset: safeOffset, limit: safeLimit, hasMore: safeOffset + items.length < unique.length, nextOffset: safeOffset + items.length < unique.length ? safeOffset + items.length : null };
   }
 
   // ===== Context-aware note retrieval (mem.ai style) =====
@@ -843,17 +958,16 @@ class BrainIndex {
     const idx = this._readIndex();
     const items = [];
     // Pre-load flat files for enriching context items with actual content
+    const _files = this.files;
     let _flatGoals = null, _flatNotes = null;
-    function _getFlatGoals() {
-      if (!_flatGoals) { try { _flatGoals = JSON.parse(require('fs').readFileSync(this.files.goals, 'utf-8')); } catch { _flatGoals = {}; } }
+    const _getFlatGoals = () => {
+      if (!_flatGoals) { try { _flatGoals = JSON.parse(require('fs').readFileSync(_files.goals, 'utf-8')); } catch { _flatGoals = {}; } }
       return _flatGoals;
-    }
-    function _getFlatNotes() {
-      if (!_flatNotes) { try { _flatNotes = JSON.parse(require('fs').readFileSync(this.files.notes, 'utf-8')); } catch { _flatNotes = {}; } }
+    };
+    const _getFlatNotes = () => {
+      if (!_flatNotes) { try { _flatNotes = JSON.parse(require('fs').readFileSync(_files.notes, 'utf-8')); } catch { _flatNotes = {}; } }
       return _flatNotes;
-    }
-    _getFlatGoals = _getFlatGoals.bind(this);
-    _getFlatNotes = _getFlatNotes.bind(this);
+    };
 
     for (const tid of topicIds) {
       const t = idx.topics[tid];
@@ -867,10 +981,9 @@ class BrainIndex {
           if (found) { goal = found; break; }
         }
         items.push({
-          type: 'goal', id: goalId, topicId: tid, topicLabel: t.label, score: 4,
+          type: 'goal', id: goalId, topicId: tid, topicLabel: t.label, relationOrder: 4,
           title: goal?.title || goalId,
           deadline: goal?.deadline || null,
-          priority: goal?.priority || null,
           completed: goal?.completed || false,
         });
       }
@@ -881,26 +994,27 @@ class BrainIndex {
         const found = notesArr.find(x => x.id === noteId);
         if (found) { note = found; }
         items.push({
-          type: 'note', id: noteId, topicId: tid, topicLabel: t.label, score: 3,
+          type: 'note', id: noteId, topicId: tid, topicLabel: t.label, relationOrder: 3,
           title: note?.title || '待 AI 归纳',
           needsEnrichment: note?.needsEnrichment === true,
           createdAt: note?.createdAt || null,
         });
       }
       if (t.precipitated && t.file) {
-        const doc = this.getTopicDocument(tid);
+        const doc = this.getTopicDocument(tid, { includeNotes: true });
         for (const n of (doc.notes || [])) {
-          items.push({ type: 'note', id: n.id, title: n.title || '待 AI 归纳', needsEnrichment: n.needsEnrichment === true, topicId: tid, topicLabel: t.label, score: 3, createdAt: n.createdAt });
+          items.push({ type: 'note', id: n.id, title: n.title || '待 AI 归纳', needsEnrichment: n.needsEnrichment === true, topicId: tid, topicLabel: t.label, relationOrder: 3, createdAt: n.createdAt });
         }
       }
     }
-    items.sort((a, b) => b.score - a.score);
+    items.sort((a, b) => b.relationOrder - a.relationOrder);
     const seen = new Set();
     const result = [];
     for (const item of items) {
       if (seen.has(item.id)) continue;
       seen.add(item.id);
-      result.push(item);
+      const { relationOrder, ...publicItem } = item;
+      result.push(publicItem);
       if (result.length >= limit) break;
     }
     const matchingTopics = topicIds

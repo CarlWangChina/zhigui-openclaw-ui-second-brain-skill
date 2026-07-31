@@ -7,11 +7,11 @@
  *      the target skill directory — the skill package "brings its own engine", import-and-go.
  *   2. Write config.json:
  *        - Dev mode (deploy from project, APP_DIR ≠ SKILL_DIR): dataDir points to
- *          <APP_DIR>/.zhigui (shared with the Electron dashboard, single source of truth).
+ *          <APP_DIR>/skill/.zhigui (shared with the Electron dashboard and development MCP).
  *        - Standalone mode (run directly against the skill directory): dataDir uses relative path ".zhigui",
  *          data lives inside the skill folder, fully self-contained and portable across machines.
- *   3. Initialize the data directory (events.json / split documents / state.json / documents.json / history.json).
- *   4. Call register-mcp to register zhigui into the global MCP config, so the agent can call it after wiring.
+ *   3. Initialize the data directory (activity.json / split documents / state.json / documents.json / history.json).
+ *   4. Call register-mcp to print MCP setup guidance for connecting zhigui to AI tools.
  *
  * Args:
  *   argv[2] = APP_DIR   (project root dir, can equal SKILL_DIR for standalone mode)
@@ -22,6 +22,7 @@
 const fs = require('fs');
 const path = require('path');
 const { register: registerMcp } = require('./register-mcp');
+const { ensureDataInitialized } = require('../lib/init-data');
 
 const APP_DIR = process.argv[2];
 const SKILL_DIR = process.argv[3];
@@ -36,7 +37,7 @@ if (!SKILL_DIR) {
 const standalone = !APP_DIR || APP_DIR === SKILL_DIR;
 const DATA_DIR = standalone
   ? path.join(SKILL_DIR, '.zhigui')
-  : path.join(APP_DIR, '.zhigui');
+  : path.join(APP_DIR, 'skill', '.zhigui');
 
 console.log('[ZhiGui] Setup starting...');
 console.log('  mode    : ' + (standalone ? 'standalone (self-contained)' : 'dev (project)'));
@@ -48,21 +49,69 @@ console.log('\n[ZhiGui] Installing engine + scripts into skill dir...');
 try {
   if (!fs.existsSync(SKILL_DIR)) fs.mkdirSync(SKILL_DIR, { recursive: true });
 
-  function copyDir(src, dst) {
-    fs.mkdirSync(dst, { recursive: true });
-    for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-      const s = path.join(src, entry.name);
-      const d = path.join(dst, entry.name);
-      if (entry.isDirectory()) copyDir(s, d);
-      else fs.copyFileSync(s, d);
-    }
+  // Sync a source tree into a destination tree: copy source -> dest, then
+  // prune dest files/dirs that no longer exist in source. This keeps the
+  // deployed skill copy == source of truth and prevents stale legacy modules
+  // (e.g. retired files the source tree has since deleted) from lingering.
+  // Only the synced subdirs (engine/dashboard/electron/lib/scripts) are pruned;
+  // top-level files like config.json / SKILL.md / package.json are copied
+  // individually below and never pruned.
+  function syncDir(src, dst) {
+    // 1. collect source file/dir relative paths (separator-normalized)
+    const srcPaths = new Set();
+    (function collect(dir, rel) {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const childRel = rel ? rel + '/' + e.name : e.name;
+        if (e.isDirectory()) {
+          srcPaths.add(childRel);
+          collect(path.join(dir, e.name), childRel);
+        } else {
+          srcPaths.add(childRel);
+        }
+      }
+    })(src, '');
+
+    // 2. copy source -> dest
+    (function copy(rel) {
+      const d = path.join(dst, rel);
+      fs.mkdirSync(d, { recursive: true });
+      const sdir = path.join(src, rel);
+      for (const e of fs.readdirSync(sdir, { withFileTypes: true })) {
+        const s = path.join(sdir, e.name);
+        const d2 = path.join(d, e.name);
+        const childRel = rel ? rel + '/' + e.name : e.name;
+        if (e.isDirectory()) copy(childRel);
+        else fs.copyFileSync(s, d2);
+      }
+    })('');
+
+    // 3. prune dest entries not present in source
+    (function prune(rel) {
+      const d = path.join(dst, rel);
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const d2 = path.join(d, e.name);
+        const childRel = rel ? rel + '/' + e.name : e.name;
+        if (e.isDirectory()) {
+          prune(childRel);
+          if (!srcPaths.has(childRel)) {
+            const remaining = fs.readdirSync(d2);
+            if (remaining.length === 0) fs.rmdirSync(d2);
+          }
+        } else {
+          if (!srcPaths.has(childRel)) {
+            fs.unlinkSync(d2);
+            console.log('  pruned orphan: ' + childRel);
+          }
+        }
+      }
+    })('');
   }
 
-  copyDir(path.join(__dirname, '..', 'engine'), path.join(SKILL_DIR, 'engine'));
-  copyDir(path.join(__dirname, '..', 'dashboard'), path.join(SKILL_DIR, 'dashboard'));
-  copyDir(path.join(__dirname, '..', 'electron'), path.join(SKILL_DIR, 'electron'));
-  copyDir(path.join(__dirname, '..', 'lib'), path.join(SKILL_DIR, 'lib'));
-  copyDir(path.join(__dirname, '..', 'scripts'), path.join(SKILL_DIR, 'scripts'));
+  syncDir(path.join(__dirname, '..', 'engine'), path.join(SKILL_DIR, 'engine'));
+  syncDir(path.join(__dirname, '..', 'dashboard'), path.join(SKILL_DIR, 'dashboard'));
+  syncDir(path.join(__dirname, '..', 'electron'), path.join(SKILL_DIR, 'electron'));
+  syncDir(path.join(__dirname, '..', 'lib'), path.join(SKILL_DIR, 'lib'));
+  syncDir(path.join(__dirname, '..', 'scripts'), path.join(SKILL_DIR, 'scripts'));
   fs.copyFileSync(path.join(__dirname, '..', 'SKILL.md'), path.join(SKILL_DIR, 'SKILL.md'));
   const tpl = path.join(__dirname, '..', 'mcp-config-template.json');
   if (fs.existsSync(tpl)) fs.copyFileSync(tpl, path.join(SKILL_DIR, 'mcp-config-template.json'));
@@ -99,75 +148,12 @@ try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
     console.log('  Created data directory: ' + DATA_DIR);
   }
-
-  const DOC_FILES = {
-    goals: { keys: ['strategicGoals', 'currentGoals', 'constraints'], title: 'Goals & Constraints', desc: 'Strategic goals, current goals, constraint principles' },
-    schedule: { keys: ['schedule', 'morningBriefing', 'conflicts'], title: 'Schedule & Morning Briefing', desc: 'Schedule, daily morning briefing, conflict detection' },
-    errands: { keys: ['errands'], title: 'Errands', desc: 'must/should/nice three-tier errands' },
-    notes: { keys: ['notes'], title: 'Life Notes', desc: 'AI-titled notes with layered on-demand detail' },
-    userProfile: { keys: ['userProfile'], title: 'User Profile', desc: 'User profile, value system, communication preferences' },
-  };
-
-  const stateFile = path.join(DATA_DIR, 'state.json');
-  let existingState = null;
-  if (!fs.existsSync(stateFile)) {
-    console.log('  Initializing state.json (first run)...');
-    const initialState = {
-      meta: { version: '2.1.0', lastUpdated: new Date().toISOString(), theme: 'dark', collapsed: true },
-      strategicGoals: [], constraints: [], currentGoals: [],
-      schedule: { weekOf: '', days: {} },
-      morningBriefing: {}, conflicts: [],
-      errands: [],
-      notes: [],
-      userProfile: {
-        personality: '', communicationStyle: '', preferredTools: [], workHabit: '',
-        interests: [], tonePreference: '', responseDetail: '', languageStyle: '',
-        notes: '', conversationCount: 0,
-        valueSystem: { priorities: [], decisionStyle: 'balanced', learnedFrom: [] },
-      },
-    };
-    fs.writeFileSync(stateFile, JSON.stringify(initialState, null, 2), 'utf8');
-    existingState = initialState;
-    console.log('  state.json created.');
+  const created = ensureDataInitialized(DATA_DIR);
+  if (created > 0) {
+    console.log(`  Initialized ${created} data file(s).`);
   } else {
-    console.log('  state.json exists.');
-    existingState = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    console.log('  All data files already exist.');
   }
-
-  for (const [docType, info] of Object.entries(DOC_FILES)) {
-    const docPath = path.join(DATA_DIR, `${docType}.json`);
-    if (!fs.existsSync(docPath)) {
-      console.log(`  Initializing ${docType}.json...`);
-      const docData = { meta: { version: '2.1.0', lastUpdated: new Date().toISOString(), documentType: docType } };
-      for (const key of info.keys) {
-        docData[key] = existingState[key] !== undefined ? existingState[key]
-          : [];
-      }
-      fs.writeFileSync(docPath, JSON.stringify(docData, null, 2), 'utf8');
-    } else console.log(`  ${docType}.json exists.`);
-  }
-
-  const indexFile = path.join(DATA_DIR, 'documents.json');
-  if (!fs.existsSync(indexFile)) {
-    console.log('  Initializing documents.json index...');
-    const docs = Object.entries(DOC_FILES).map(([type, info]) => ({
-      type, title: info.title, description: info.desc,
-      lastUpdated: new Date().toISOString(),
-      size: fs.statSync(path.join(DATA_DIR, `${type}.json`)).size,
-    }));
-    fs.writeFileSync(indexFile, JSON.stringify({
-      meta: { version: '2.1.0', lastUpdated: new Date().toISOString(), description: 'ZhiGui document index - first-layer retrieval' },
-      documents: docs,
-    }, null, 2), 'utf8');
-  } else console.log('  documents.json index exists.');
-
-  const historyFile = path.join(DATA_DIR, 'history.json');
-  if (!fs.existsSync(historyFile)) {
-    console.log('  Initializing history.json...');
-    fs.writeFileSync(historyFile, JSON.stringify({
-      meta: { totalConversations: 0, lastConversation: null }, conversations: [],
-    }, null, 2), 'utf8');
-  } else console.log('  history.json exists.');
 } catch (err) {
   console.error('  [ERROR] Data init failed: ' + err.message);
   process.exit(1);
@@ -211,4 +197,4 @@ if (!standalone && APP_DIR) {
 console.log('\n[ZhiGui] Setup complete!');
 console.log('  - Skill engine installed at: ' + SKILL_DIR);
 console.log('  - Data at: ' + DATA_DIR);
-console.log('  - Next: register the zhigui MCP server in your AI tool (see SKILL.md "Installation & Setup").');
+console.log('  - Next: register the zhigui MCP server in your AI tool (see mcp-config-template.json).');

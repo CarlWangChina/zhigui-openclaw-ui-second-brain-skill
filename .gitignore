@@ -1,6 +1,11 @@
 # === Dependencies (install via npm on first run) ===
 node_modules/
 
+# === Runtime data (personal notes, schedules and generated indexes) ===
+# Keep only code and deterministic test fixtures in version control.
+.zhigui/
+skill/.zhigui/
+
 # === IDE / local tool configs (contain machine-specific paths) ===
 .trae/
 .cursor/

@@ -86,15 +86,18 @@
       <!-- Morning Briefing Section -->
       <section class="focus-hero" id="focus-hero" data-view="today">
         <div class="focus-hero-topline">
-          <span class="focus-eyebrow" id="focus-eyebrow">今日方向</span>
+          <span class="focus-eyebrow" id="focus-eyebrow">今日概览</span>
           <span class="focus-date" id="focus-date"></span>
         </div>
-        <h1 class="focus-title" id="focus-title">Choose the next meaningful move.</h1>
-        <p class="focus-summary" id="focus-summary">知归将帮你平衡承诺、精力与长期方向。</p>
+        <h1 class="focus-title" id="focus-title">暂无安排</h1>
+        <p class="focus-summary" id="focus-summary">当前日期的行动与完成情况会显示在这里。</p>
         <div class="focus-metrics">
           <div class="focus-metric"><strong id="focus-task-count">0</strong><span id="focus-task-label">待处理</span></div>
           <div class="focus-metric"><strong id="focus-goal-count">0</strong><span id="focus-goal-label">进行中目标</span></div>
           <div class="focus-metric"><strong id="focus-progress">0%</strong><span id="focus-progress-label">今日进度</span></div>
+        </div>
+        <div class="attention-signals" id="attention-signals" style="display:none">
+          <!-- Rendered by JS: signal pills like "2 overdue · 1 blocked" -->
         </div>
         <div class="focus-actions">
           <button class="focus-action primary" id="focus-add-event" onclick="showAddEventForm()">＋ 加入日程</button>
@@ -130,6 +133,7 @@
             <div class="briefing-block-head"><span class="briefing-dot gold"></span><span class="briefing-block-label" data-i18n="briefing.dailyQuote">每日一言</span></div>
             <div class="briefing-row-text" id="briefing-dailyQuote-content"></div>
           </div>
+          <div class="briefing-empty" id="briefing-empty-state" data-i18n="briefing.empty">等待 AI 阅读今日上下文后写入晨报</div>
         </div>
       </section>
 
@@ -191,6 +195,17 @@
         </div>
       </section>
 
+      <!-- Decisions Section -->
+      <section class="section" id="section-decisions" data-view="all">
+        <div class="section-header">
+          <span class="section-icon">◈</span>
+          <span class="section-title" data-i18n="section.decisions">Decisions</span>
+        </div>
+        <div class="decisions-container" id="decisions-container">
+          <!-- Rendered by JS -->
+        </div>
+      </section>
+
       <!-- Event Stream section removed (raw ingestion log; not user-facing) -->
 
       <!-- Unscheduled action queue (shown in both Today and All views) -->
@@ -199,9 +214,6 @@
           <span class="section-icon">◈</span>
           <span class="section-title" data-i18n="section.errands">Unscheduled actions</span>
           <span class="section-date" id="errands-date"></span>
-          <button class="section-review-btn" id="pending-review-button" type="button" onclick="openPendingReviewModal()">
-            <span aria-hidden="true">⚙</span><span id="pending-review-count"></span>
-          </button>
           <button class="section-add-btn" onclick="showAddErrandForm()" title="Add action">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
               <path d="M12 5v14M5 12h14"/>
@@ -213,26 +225,37 @@
         </div>
       </section>
 
-      <!-- Related Notes (mem.ai-style auto-push) — placed at the bottom of the Today view -->
-      <section class="section" id="section-related-notes" data-view="today">
+      <!-- Completed Actions Section (today's completed errands with undo) -->
+      <section class="section" id="section-completed" data-view="today">
         <div class="section-header">
           <span class="section-icon">◈</span>
-          <span class="section-title" data-i18n="section.relatedNotes">Related Notes</span>
-          <span class="section-date" id="related-notes-meta"></span>
+          <span class="section-title" data-i18n="section.completed">Completed Today</span>
         </div>
-        <div class="related-notes-container" id="related-notes-container">
-          <!-- Rendered by JS — shows recently relevant notes based on latest conversation -->
+        <div class="completed-container" id="completed-container">
+          <!-- Rendered by JS -->
         </div>
       </section>
 
-      <!-- Life Notes Section (AI-authored summary index; bodies load on demand) -->
+      <!-- Daily Reflection Section -->
+      <section class="section" id="section-reflection" data-view="today">
+        <div class="section-header">
+          <span class="section-icon">◈</span>
+          <span class="section-title" data-i18n="section.reflection">Daily Reflection</span>
+        </div>
+        <div class="reflection-container" id="reflection-container">
+          <!-- Rendered by JS -->
+        </div>
+      </section>
+
+      <!-- Notes Section (AI-authored summary index; bodies load on demand) -->
       <section class="section" id="section-notes" data-view="all">
         <div class="section-header">
           <span class="section-icon">◈</span>
-          <span class="section-title" data-i18n="section.notes">Life Notes</span>
+          <span class="section-title" data-i18n="section.notes">Notes</span>
         </div>
         <div class="note-add-trigger">
           <button class="note-add-trigger-btn" onclick="openNoteModal()" data-i18n="note.addBtn">＋ 记录笔记</button>
+          <div class="note-chat-import-hint" data-i18n="note.chatImportHint">需要 AI 总结、分类的文件，请直接附加到聊天框；AI 会在当前对话处理。</div>
         </div>
         <div class="note-tabs">
           <button class="note-tab active" data-topic="__all" onclick="switchNoteTab('__all')" data-i18n="note.all">All</button>
@@ -251,7 +274,7 @@
           <select class="kb-category-filter" id="kb-category-filter" onchange="filterTopicsByCategory(this.value)">
             <option value="" data-i18n="kb.category.all">All Categories</option>
           </select>
-          <input type="text" class="kb-search-input" id="kb-search-input" data-i18n-ph="kb.search.ph" placeholder="Search: exam / interview / wisdom tooth…" oninput="runKbSearch()" onkeydown="if(event.key==='Enter')runKbSearch()">
+          <input type="text" class="kb-search-input" id="kb-search-input" data-i18n-ph="kb.search.ph" placeholder="Search notes, goals, topics…" oninput="runKbSearch()" onkeydown="if(event.key==='Enter')runKbSearch()">
           <button class="kb-search-btn" onclick="runKbSearch()" data-i18n="kb.search.btn">Search</button>
         </div>
         <div class="kb-search-results" id="kb-search-results"></div>
@@ -267,25 +290,7 @@
 
   <!-- Collapsed State: Mini icon — click to expand back -->
   <div id="mini-view" class="mini-view" style="display:none" onclick="toggleCollapseUI()">
-    <span class="mini-logo">归</span>
-  </div>
-
-  <!-- ====== Priority Adjustment Modal ====== -->
-  <div id="priority-modal" class="modal-overlay" style="display:none" onclick="closePriorityModal(event)">
-    <div class="modal-card" onclick="event.stopPropagation()">
-      <div class="modal-title" data-i18n="modal.priority.title">Adjust Priority</div>
-      <div class="modal-subtitle" id="priority-target-name"></div>
-      <div class="priority-display">
-        <span class="priority-value" id="priority-value-display">50</span>
-        <span class="priority-unit">/ 100</span>
-      </div>
-      <input type="range" min="0" max="100" value="50" class="priority-slider" id="priority-slider" oninput="updatePriorityDisplay(this.value)">
-      <div class="priority-hint" data-i18n="modal.priority.hint">Your override is preserved until you release it; AI can still explain alternatives.</div>
-      <div class="modal-actions">
-        <button class="modal-btn cancel" onclick="closePriorityModal()" data-i18n="btn.cancel">Cancel</button>
-        <button class="modal-btn confirm" onclick="confirmPriority()" data-i18n="btn.confirm">Confirm</button>
-      </div>
-    </div>
+    <span class="mini-logo">知归</span>
   </div>
 
   <!-- ====== Add Event Modal ====== -->
@@ -317,7 +322,7 @@
       <div class="event-form">
         <label class="form-label" data-i18n="form.time">Time</label>
         <input type="time" class="form-input" id="time-editor-time">
-        <div class="priority-hint" data-i18n="modal.time.hint">Clear the time to move this action back to Unscheduled actions.</div>
+        <div class="time-hint" data-i18n="modal.time.hint">Clear the time to move this action back to Unscheduled actions.</div>
         <label class="form-label" data-i18n="form.duration">Duration (min)</label>
         <input type="number" class="form-input" id="time-editor-duration" min="5" max="1440">
       </div>
@@ -348,9 +353,6 @@
         <input type="text" class="form-input" id="goal-title" placeholder="e.g., pass exam, no late nights">
         <label class="form-label" data-i18n="form.desc">Description (optional)</label>
         <input type="text" class="form-input" id="goal-desc" placeholder="Additional notes">
-        <label class="form-label"><span data-i18n="form.priority">Priority</span>: <span id="goal-priority-display">50</span> / 100</label>
-        <input type="range" min="0" max="100" value="50" class="priority-slider" id="goal-priority-slider" oninput="document.getElementById('goal-priority-display').textContent=this.value">
-        <div class="priority-hint" data-i18n="modal.goal.hint">知归可能会提出不同建议。</div>
       </div>
       <div class="modal-actions">
         <button class="modal-btn cancel" onclick="closeGoalModal()" data-i18n="btn.cancel">Cancel</button>
@@ -391,9 +393,9 @@
         <label class="form-label" data-i18n="form.time">Time (optional)</label>
         <input type="time" class="form-input" id="errand-time" title="Optional: add a time to place this action in the schedule">
         <label class="form-label" data-i18n="form.duration">Duration (min)</label>
-        <input type="number" class="form-input" id="errand-duration" value="60" min="5" max="480">
-        <label class="form-label" data-i18n="form.priority">Priority</label>
-        <select class="form-input" id="errand-priority">
+        <input type="number" class="form-input" id="errand-duration" value="60" min="5" max="1440">
+        <label class="form-label" data-i18n="form.commitment">Commitment</label>
+        <select class="form-input" id="errand-commitment">
           <option value="must" data-i18n="errand.opt.must">Must - do today</option>
           <option value="should" selected data-i18n="errand.opt.should">Should - today if possible</option>
           <option value="nice" data-i18n="errand.opt.nice">Nice - if free</option>
@@ -411,9 +413,9 @@
   <!-- ====== Action delete confirmation (works in both the browser and desktop shell) ====== -->
   <div id="action-delete-modal" class="modal-overlay" style="display:none" onclick="closeActionDeleteModal(event)">
     <div class="modal-card" onclick="event.stopPropagation()">
-      <div class="modal-title" data-i18n="modal.actionDelete.title">Delete action</div>
+      <div class="modal-title" id="action-delete-title" data-i18n="modal.actionDelete.title">Delete action</div>
       <div class="modal-subtitle" id="action-delete-name"></div>
-      <div class="topic-delete-warn" data-i18n="modal.actionDelete.hint">This removes the action from the current list and cannot be undone.</div>
+      <div id="action-delete-impact"></div>
       <div class="modal-actions">
         <button class="modal-btn cancel" onclick="closeActionDeleteModal()" data-i18n="btn.cancel">Cancel</button>
         <button class="modal-btn danger" onclick="confirmActionDelete()" data-i18n="modal.actionDelete.btn">Delete action</button>
@@ -421,25 +423,16 @@
     </div>
   </div>
 
-  <!-- ====== Settings review queue: AI proposals and conflicts require user confirmation ====== -->
-  <div id="pending-review-modal" class="modal-overlay" style="display:none" onclick="closePendingReviewModal(event)">
-    <div class="modal-card review-modal-card" onclick="event.stopPropagation()">
-      <div class="modal-title" data-i18n="modal.review.title">Organization &amp; conflict review</div>
-      <div id="pending-review-list" class="pending-review-list"></div>
-      <div class="modal-actions"><button class="modal-btn cancel" onclick="closePendingReviewModal()" data-i18n="btn.cancel">Cancel</button></div>
-    </div>
-  </div>
-
   <!-- ====== Topic Cascade Delete Confirmation Modal ====== -->
   <div id="topic-delete-modal" class="modal-overlay" style="display:none" onclick="closeTopicDeleteModal(event)">
     <div class="modal-card" onclick="event.stopPropagation()">
-      <div class="modal-title" data-i18n="modal.topicDelete.title">Confirm Cascade Delete</div>
+      <div class="modal-title" data-i18n="modal.topicDelete.title">Delete topic and owned notes</div>
       <div class="modal-subtitle" id="topic-delete-name"></div>
       <div class="topic-delete-preview" id="topic-delete-preview"></div>
-      <div class="topic-delete-warn" data-i18n="modal.topicDelete.warn">This will also delete all related events, goals, schedule tasks, errands and notes under this topic. This cannot be undone.</div>
+      <div class="topic-delete-warn" data-i18n="modal.topicDelete.warn">Only notes owned by this topic will be deleted. Related goals, errands and schedule items stay, but their deleted-note and topic links will be removed.</div>
       <div class="modal-actions">
         <button class="modal-btn cancel" onclick="closeTopicDeleteModal()" data-i18n="btn.cancel">Cancel</button>
-        <button class="modal-btn danger" onclick="confirmTopicDelete()" data-i18n="modal.topicDelete.btn">Confirm Cascade Delete</button>
+        <button class="modal-btn danger" onclick="confirmTopicDelete()" data-i18n="modal.topicDelete.btn">Delete topic and notes</button>
       </div>
     </div>
   </div>

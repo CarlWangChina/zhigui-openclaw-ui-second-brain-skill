@@ -17,6 +17,13 @@ const fs = require('fs');
 const path = require('path');
 const { EventEmitter } = require('events');
 const { DOCUMENT_KEYS, validateStateSchema } = require('./constants');
+const DateUtils = require('./date-utils');
+
+// Deep clone helper: uses structuredClone (Node.js 17+) when available,
+// falls back to JSON round-trip for older runtimes.
+const _deepClone = typeof structuredClone === 'function'
+  ? (obj) => structuredClone(obj)
+  : (obj) => JSON.parse(JSON.stringify(obj));
 
 // Lazy-load Hierarchy (avoids circular require if hierarchy.js ever requires storage)
 let _Hierarchy = null;
@@ -44,7 +51,8 @@ function _detectChangedDocs(state) {
   if (state.schedule !== undefined) docs.push('schedule');
   if (state.errands !== undefined) docs.push('errands');
   if (state.notes !== undefined) docs.push('notes');
-  if (state.pendingReviews !== undefined || state.importBatches !== undefined) docs.push('settingsConflicts');
+  if (state.decisions !== undefined) docs.push('decisions');
+  if (state.events !== undefined) docs.push('activity');
   if (state.reminders !== undefined) docs.push('reminders');
   if (state.userProfile !== undefined) docs.push('userProfile');
   return docs;
@@ -61,9 +69,11 @@ let DATA_DIR = null;
 let LOCK_DEPTH = 0;
 function setDataDir(dir) {
   DATA_DIR = dir;
+  recoverAtomicBackups(dir);
   // Task 3.1: Invalidate cache and hierarchy instance when data directory changes
   _fullStateCache = null;
   _hierarchyInstance = null;
+  recoverPendingStateTransaction(dir);
 }
 
 // Task 3.1: readFullState performance optimization — mtime-based read cache.
@@ -96,10 +106,13 @@ function _getSentinelFiles() {
   const files = [
     STATE_FILE,
     DOCUMENT_FILES.errands,
-    DOCUMENT_FILES.settingsConflicts,
     DOCUMENT_FILES.reminders,
     DOCUMENT_FILES.userProfile,
     DOCUMENT_FILES.schedule,  // schedule-level meta (conflicts, briefings)
+    DOCUMENT_FILES.decisions,
+    DOCUMENT_FILES.activity,
+    DOCUMENT_FILES.goals,     // flat projection — brain-index reads from this
+    DOCUMENT_FILES.notes,     // flat projection — brain-index reads from this
   ];
   // Hierarchy index files (lightweight — their mtime changes whenever any detail is written)
   if (h) {
@@ -112,11 +125,14 @@ function _getSentinelFiles() {
 // Returns true if the cache is stale (or absent), false if it's still valid.
 function _isCacheStale() {
   if (!_fullStateCache) return true;
+  // PERF #28: Short-circuit — within the check window, assume cache is valid
+  // to avoid repeated statSync calls in hot read paths.
   for (const filePath of _getSentinelFiles()) {
     if (_getFileMtime(filePath) !== _fullStateCache.mtimes.get(filePath)) {
       return true;
     }
   }
+  // Cache is still valid — extend the short window
   return false;
 }
 
@@ -132,6 +148,7 @@ function _snapshotMtimes() {
 // Invalidate the read cache. Called by the write emitter and on setDataDir.
 function invalidateCache() {
   _fullStateCache = null;
+  // PERF #28: Reset the short-window cache so the next read re-checks mtimes.
 }
 
 // Register cache invalidation on every successful write (P0-2.2 emitter).
@@ -139,26 +156,63 @@ function invalidateCache() {
 // waiting for the next mtime check.
 onWrite(() => { invalidateCache(); });
 
+// Recover documents left in the safe backup position by a Windows replacement
+// fallback. A backup is only used when the target is missing; otherwise it is a
+// completed-write residue and can be removed.
+function recoverAtomicBackups(dir) {
+  if (!dir || !fs.existsSync(dir)) return;
+  const visit = (current) => {
+    let entries = [];
+    try { entries = fs.readdirSync(current, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const fullPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        visit(fullPath);
+      } else if (entry.isFile() && entry.name.endsWith('.backup')) {
+        const target = fullPath.slice(0, -'.backup'.length);
+        try {
+          if (!fs.existsSync(target)) fs.renameSync(fullPath, target);
+          else fs.unlinkSync(fullPath);
+        } catch {}
+      }
+    }
+  };
+  visit(dir);
+}
+
 // Write JSON through a sibling temporary file and atomically replace the target.
-// A crash can therefore leave either the old or the new complete document, never
-// a half-written JSON file.
+// When Windows refuses a direct replacement, move the old complete file to a
+// recoverable backup before installing the new one. This avoids a delete/rename
+// gap that could otherwise lose the only copy during a crash.
 function writeJsonAtomic(filePath, data) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  recoverAtomicBackups(path.dirname(filePath));
   const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
   fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf8');
   try {
     fs.renameSync(tempPath, filePath);
   } catch (err) {
-    // Windows cannot always replace an existing file with renameSync. Remove the
-    // destination only after the complete temporary document is safely written.
-    try { fs.unlinkSync(filePath); } catch {}
-    fs.renameSync(tempPath, filePath);
+    const backupPath = `${filePath}.backup`;
+    try {
+      try { fs.unlinkSync(backupPath); } catch {}
+      if (fs.existsSync(filePath)) fs.renameSync(filePath, backupPath);
+      fs.renameSync(tempPath, filePath);
+      try { fs.unlinkSync(backupPath); } catch {}
+    } catch (fallbackError) {
+      // Best-effort immediate restoration. If the process dies before this
+      // runs, setDataDir() restores the .backup on the next launch.
+      try {
+        if (!fs.existsSync(filePath) && fs.existsSync(backupPath)) fs.renameSync(backupPath, filePath);
+      } catch {}
+      try { fs.unlinkSync(tempPath); } catch {}
+      throw fallbackError;
+    }
   }
 }
 
 // ===== Cross-process file lock (solves A, C: concurrent write race conditions) =====
 // Uses a lock file on disk. Lock auto-expires after LOCK_TIMEOUT_MS to handle crashes.
-const LOCK_TIMEOUT_MS = 15000;  // lock expires after 15 seconds
+const LOCK_TIMEOUT_MS = 30000;  // lock expires after 30 seconds (allows for large writes)
 const LOCK_RETRY_MS = 50;       // retry interval
 const LOCK_RETRY_MAX = 60;      // max retries (~3 seconds total)
 const LOCK_FILE_NAME = '.write-lock';
@@ -172,30 +226,46 @@ function _lockPath() {
 // processName: 'ai' | 'dashboard' | 'electron' — used for SSE notification
 function acquireLock(processName) {
   const lockFile = _lockPath();
-  if (!lockFile) return false; // no DATA_DIR, cannot acquire lock
+  if (!lockFile) return false;
   const now = Date.now();
+  const lockData = {
+    pid: process.pid,
+    process: processName,
+    acquiredAt: new Date().toISOString(),
+    expiresAt: now + LOCK_TIMEOUT_MS,
+  };
   try {
-    // Check if lock file exists and is still valid
+    // Atomically create the lock file (O_EXCL). If it exists, this fails.
+    const fd = fs.openSync(lockFile, 'wx');
+    fs.writeFileSync(fd, JSON.stringify(lockData, null, 2), 'utf8');
+    fs.closeSync(fd);
+    return true;
+  } catch (err) {
+    // Lock file exists — check if it's expired
     try {
       const existing = JSON.parse(fs.readFileSync(lockFile, 'utf8'));
       const expiresAt = existing.expiresAt || 0;
-      if (now < expiresAt && existing.pid !== process.pid) {
-        // Lock is held by another process and hasn't expired
-        return false;
+      const isOwnLock = existing.pid === process.pid;
+      // Before taking over an "expired" lock, verify the holding process is
+      // actually dead. A live process that is doing a large write should not
+      // have its lock stolen just because it exceeded the timeout.
+      const isHolderDead = () => {
+        if (!existing.pid || isOwnLock) return true;
+        try { process.kill(existing.pid, 0); return false; }
+        catch { return true; } // ESRCH — process does not exist
+      };
+      if (isOwnLock || (now >= expiresAt && isHolderDead())) {
+        // Lock expired or we already own it — take over atomically
+        // Use unlink + openSync(wx) to avoid race with another process
+        try { fs.unlinkSync(lockFile); } catch {}
+        try {
+          const fd = fs.openSync(lockFile, 'wx');
+          fs.writeFileSync(fd, JSON.stringify(lockData, null, 2), 'utf8');
+          fs.closeSync(fd);
+          return true;
+        } catch { return false; }
       }
-    } catch {
-      // Lock file doesn't exist or is corrupt — we can acquire
-    }
-    // Write our lock
-    const lockData = {
-      pid: process.pid,
-      process: processName,
-      acquiredAt: new Date().toISOString(),
-      expiresAt: now + LOCK_TIMEOUT_MS,
-    };
-    fs.writeFileSync(lockFile, JSON.stringify(lockData, null, 2), 'utf8');
-    return true;
-  } catch {
+    } catch {}
     return false;
   }
 }
@@ -204,9 +274,15 @@ function acquireLock(processName) {
 function acquireLockBlocking(processName) {
   for (let i = 0; i < LOCK_RETRY_MAX; i++) {
     if (acquireLock(processName)) return true;
-    // Wait and retry — use synchronous sleep
+    // Sleep synchronously without 100% CPU spin.
+    // Atomics.wait is the lightest synchronous sleep in Node.js.
     const start = Date.now();
-    while (Date.now() - start < LOCK_RETRY_MS) { /* busy wait */ }
+    const sharedBuf = new Int32Array(new SharedArrayBuffer(4));
+    Atomics.wait(sharedBuf, 0, 0, LOCK_RETRY_MS);
+    // Fallback if Atomics.wait unavailable (older Node)
+    if (Date.now() - start < LOCK_RETRY_MS) {
+      while (Date.now() - start < LOCK_RETRY_MS) { /* fallback busy wait */ }
+    }
   }
   return false;
 }
@@ -275,7 +351,8 @@ function _paths() {
       schedule: path.join(d, 'schedule.json'),
       errands: path.join(d, 'errands.json'),
       notes: path.join(d, 'notes.json'),
-      settingsConflicts: path.join(d, 'settings-conflicts.json'),
+      decisions: path.join(d, 'decisions.json'),
+      activity: path.join(d, 'activity.json'),
       reminders: path.join(d, 'reminders.json'),
       userProfile: path.join(d, 'userProfile.json'),
     },
@@ -338,7 +415,6 @@ function updateIndexTimestamp(docType) {
       idx = { meta: { lastUpdated: new Date().toISOString(), description: 'ZhiGui document index - first-layer retrieval' }, documents: [] };
     }
     if (idx && idx.documents) {
-      idx.documents = idx.documents.filter(document => document.type !== 'decisions');
       const doc = idx.documents.find(d => d.type === docType);
       if (doc) {
         doc.lastUpdated = new Date().toISOString();
@@ -348,6 +424,177 @@ function updateIndexTimestamp(docType) {
       writeJsonAtomic(INDEX_FILE, idx);
     }
   } catch {}
+}
+
+// Activity is an episodic change journal, not a second source of entity truth.
+// It lets the next AI conversation learn what the user changed from the panel
+// without loading every schedule or note detail.
+// Fingerprint for deduplication: same operation/kind on the same entity (or same
+// set of related ids) within a short window is treated as one fact.
+function activityFingerprint(e) {
+  const rel = [
+    ...(e.relatedNoteIds || []),
+    ...(e.relatedGoalIds || []),
+    ...(e.relatedErrandIds || []),
+    ...(e.relatedTopicIds || []),
+  ].sort().join(',');
+  const entity = e.entityId || e.id || '';
+  return `${e.operation || ''}|${e.kind || ''}|${entity}|${rel}`;
+}
+
+function appendActivity(event) {
+  return withLock('activity', () => {
+    const { DOCUMENT_FILES } = _paths();
+    let data = { meta: {}, events: [] };
+    try { data = JSON.parse(fs.readFileSync(DOCUMENT_FILES.activity, 'utf8')); } catch {}
+    let events = Array.isArray(data.events) ? data.events : [];
+    const newEvent = {
+      id: event.id || `change_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      at: event.at || new Date().toISOString(),
+      // Panel changes are facts first and need an assistant to interpret their
+      // longer-term impact later.  AI-originated writes are already interpreted.
+      reconciliationStatus: event.reconciliationStatus || 'pending',
+      ...event,
+    };
+    events.push(newEvent);
+    // Deduplicate: same fingerprint within 60s (double-click / retry) keeps one
+    // record. Prefer a settled reconciliation status if either copy is settled so
+    // we never lose an already-reconciled fact.
+    const DEDUP_WINDOW_MS = 60 * 1000;
+    const seen = new Map();
+    const deduped = [];
+    for (const ev of events) {
+      const fp = activityFingerprint(ev);
+      const idx = seen.get(fp);
+      if (idx !== undefined) {
+        const prev = deduped[idx];
+        const dt = Math.abs(new Date(ev.at).getTime() - new Date(prev.at).getTime());
+        if (dt <= DEDUP_WINDOW_MS) {
+          if (prev.reconciliationStatus === 'pending' && ev.reconciliationStatus && ev.reconciliationStatus !== 'pending') {
+            prev.reconciliationStatus = ev.reconciliationStatus;
+            prev.reconciledAt = ev.reconciledAt;
+          }
+          continue;
+        }
+      }
+      seen.set(fp, deduped.length);
+      deduped.push(ev);
+    }
+    events = deduped;
+    // Never compact away a pending fact. Settled history is bounded because it
+    // is only audit evidence; current state remains in canonical entities.
+    const pending = events.filter(item => ['pending', 'needs_user'].includes(item.reconciliationStatus));
+    const settled = events.filter(item => !['pending', 'needs_user'].includes(item.reconciliationStatus)).slice(-300);
+    // Pending facts are deliberately not capped: losing one would make a later
+    // conversation invent continuity. Bootstrap pages them explicitly, while
+    // settled audit history remains bounded. Keep the count as an operational
+    // signal for the panel/assistant rather than pretending the journal is full.
+    data = {
+      meta: {
+        ...(data.meta || {}),
+        lastUpdated: new Date().toISOString(),
+        documentType: 'activity',
+        pendingCount: pending.length,
+        backlogWarning: pending.length > 200,
+      },
+      events: [...pending, ...settled],
+    };
+    writeJsonAtomic(DOCUMENT_FILES.activity, data);
+    updateIndexTimestamp('activity');
+    return data.events[data.events.length - 1];
+  });
+}
+
+function readPendingActivityPage({ limit = 20, offset = 0 } = {}) {
+  try {
+    const data = JSON.parse(fs.readFileSync(_paths().DOCUMENT_FILES.activity, 'utf8'));
+    const pending = (Array.isArray(data.events) ? data.events : [])
+      .filter(event => ['pending', 'needs_user'].includes(event.reconciliationStatus))
+      .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+    const safeLimit = Math.max(1, Math.min(Number(limit) || 20, 100));
+    const safeOffset = Math.max(0, Number(offset) || 0);
+    const items = pending.slice(safeOffset, safeOffset + safeLimit);
+    const byOperation = {};
+    for (const event of pending) byOperation[event.operation || 'unknown'] = (byOperation[event.operation || 'unknown'] || 0) + 1;
+    return {
+      items,
+      total: pending.length,
+      offset: safeOffset,
+      limit: safeLimit,
+      hasMore: safeOffset + items.length < pending.length,
+      nextOffset: safeOffset + items.length < pending.length ? safeOffset + items.length : null,
+      summary: {
+        oldestAt: pending[pending.length - 1]?.at || null,
+        newestAt: pending[0]?.at || null,
+        byOperation,
+      },
+    };
+  } catch {
+    return { items: [], total: 0, offset: 0, limit: Math.max(1, Math.min(Number(limit) || 20, 100)), hasMore: false, nextOffset: null, summary: { oldestAt: null, newestAt: null, byOperation: {} } };
+  }
+}
+
+// Compatibility helper for existing panel and test callers. New assistant
+// reads should use readPendingActivityPage so no pending user fact is hidden.
+function readPendingActivity({ limit = 20, offset = 0 } = {}) {
+  return readPendingActivityPage({ limit, offset }).items;
+}
+
+function findPendingActivity(eventId) {
+  if (!eventId) return null;
+  try {
+    const data = JSON.parse(fs.readFileSync(_paths().DOCUMENT_FILES.activity, 'utf8'));
+    return (Array.isArray(data.events) ? data.events : [])
+      .find(event => event.id === eventId && ['pending', 'needs_user'].includes(event.reconciliationStatus)) || null;
+  } catch {
+    return null;
+  }
+}
+
+// Mark one event only after the canonical patches have been persisted.  The
+// event id makes this operation idempotent across conversations.
+function reconcileActivityEvent(eventId, patch = {}) {
+  return withLock('activity', () => {
+    const { DOCUMENT_FILES } = _paths();
+    let data = { meta: {}, events: [] };
+    try { data = JSON.parse(fs.readFileSync(DOCUMENT_FILES.activity, 'utf8')); } catch {}
+    const event = (data.events || []).find(item => item.id === eventId);
+    if (!event) return { found: false };
+    if (!['pending', 'needs_user'].includes(event.reconciliationStatus)) {
+      return { found: true, alreadyHandled: true, event };
+    }
+    Object.assign(event, patch, {
+      reconciledAt: new Date().toISOString(),
+    });
+    const pendingCount = (data.events || []).filter(item => ['pending', 'needs_user'].includes(item.reconciliationStatus)).length;
+    data.meta = {
+      ...(data.meta || {}),
+      lastUpdated: new Date().toISOString(),
+      documentType: 'activity',
+      pendingCount,
+      backlogWarning: pendingCount > 200,
+    };
+    writeJsonAtomic(DOCUMENT_FILES.activity, data);
+    updateIndexTimestamp('activity');
+    return { found: true, event };
+  });
+}
+
+function readRecentActivity({ sinceVersion = null, limit = 20 } = {}) {
+  try {
+    const data = JSON.parse(fs.readFileSync(_paths().DOCUMENT_FILES.activity, 'utf8'));
+    let events = Array.isArray(data.events) ? data.events : [];
+    if (Number.isFinite(Number(sinceVersion))) events = events.filter(event => Number(event.stateVersion || 0) > Number(sinceVersion));
+    // Pending facts are stored ahead of settled audit history so compaction can
+    // preserve them. Recent reads therefore must sort by the durable version /
+    // timestamp rather than rely on file order.
+    return [...events]
+      .sort((a, b) => Number(b.stateVersion || 0) - Number(a.stateVersion || 0)
+        || String(b.at || b.reconciledAt || '').localeCompare(String(a.at || a.reconciledAt || '')))
+      .slice(0, Math.max(1, Math.min(Number(limit) || 20, 100)));
+  } catch {
+    return [];
+  }
 }
 
 // --- Aggregate read/write (hierarchical: primary storage is now the file tree) ---
@@ -365,7 +612,7 @@ function readState() {
 // On write: write to hierarchy (index + detail files) + small documents.
 // Also writes the full state to state.json as a fallback copy, ensuring all three
 // ends (MCP, Dashboard, Electron) can read each other's edits.
-function writeState(state) {
+function writeState(state, { recovering = false } = {}) {
   // Task 1.3: Dev-mode schema validation
   if (process.env.NODE_ENV === 'development') {
     const errors = validateStateSchema(state);
@@ -377,6 +624,17 @@ function writeState(state) {
     const { DOCUMENT_FILES, STATE_FILE } = _paths();
     const now = new Date().toISOString();
     const h = _getHierarchyInstance();
+    const recoveryPath = _stateRecoveryPath();
+
+    // This snapshot remains until every projection below is durable. If a
+    // process stops mid-write, setDataDir() replays it before serving reads.
+    if (!recovering || !fs.existsSync(recoveryPath)) {
+      writeJsonAtomic(recoveryPath, {
+        version: 1,
+        createdAt: now,
+        state,
+      });
+    }
 
     // 1. Write goals to hierarchy (index + per-goal detail files)
     if (state.currentGoals || state.strategicGoals || state.constraints) {
@@ -462,8 +720,10 @@ function writeState(state) {
       }
     }
 
-    // 4. Write small documents (errands, review queue, reminders, userProfile)
-    const smallDocs = ['errands', 'settingsConflicts', 'reminders', 'userProfile'];
+    // 4. Write small canonical documents.  The activity journal is intentionally
+    // excluded: it is append/reconcile-only and must never be overwritten by a
+    // stale state snapshot during an unrelated entity write.
+    const smallDocs = ['errands', 'decisions', 'reminders', 'userProfile'];
     for (const docType of smallDocs) {
       const docData = { meta: { lastUpdated: now, documentType: docType } };
       for (const key of (DOCUMENT_KEYS[docType] || [])) {
@@ -474,7 +734,7 @@ function writeState(state) {
       try {
         const existing = JSON.parse(fs.readFileSync(DOCUMENT_FILES[docType], 'utf-8'));
         if (existing.meta) docData.meta = { ...existing.meta, ...docData.meta };
-      } catch {}
+      } catch (e) { process.stderr.write(`[storage] writeState read existing doc error (${docType}): ${e.message}\n`); }
       writeJsonAtomic(DOCUMENT_FILES[docType], docData);
       updateIndexTimestamp(docType);
     }
@@ -489,33 +749,40 @@ function writeState(state) {
     state._hierarchyEnabled = true;
     writeJsonAtomic(STATE_FILE, state);
 
-    // 6. Write legacy flat files for Dashboard backward compatibility
-    try {
-      const flatGoals = {
-        meta: { lastUpdated: now, documentType: 'goals' },
-        strategicGoals: state.strategicGoals || [],
-        currentGoals: state.currentGoals || [],
-        constraints: state.constraints || [],
-      };
-      writeJsonAtomic(DOCUMENT_FILES.goals, flatGoals);
-    } catch {}
-    try {
-      const flatSchedule = {
-        meta: { lastUpdated: now, documentType: 'schedule' },
-        schedule: state.schedule || { days: {} },
-        morningBriefing: state.morningBriefing || null,
-        conflicts: state.conflicts || [],
-        briefings: state.briefings || [],
-      };
-      writeJsonAtomic(DOCUMENT_FILES.schedule, flatSchedule);
-    } catch {}
-    try {
-      const flatNotes = {
-        meta: { lastUpdated: now, documentType: 'notes' },
-        notes: canonicalNotes || (Array.isArray(state.notes) ? state.notes : []),
-      };
-      writeJsonAtomic(DOCUMENT_FILES.notes, flatNotes);
-    } catch {}
+    // 6. Write compatibility projections. Do not swallow a failure here: the
+    // recovery snapshot must remain so the next launch repairs every file.
+    const flatGoals = {
+      meta: { lastUpdated: now, documentType: 'goals' },
+      strategicGoals: state.strategicGoals || [],
+      currentGoals: state.currentGoals || [],
+      constraints: state.constraints || [],
+    };
+    writeJsonAtomic(DOCUMENT_FILES.goals, flatGoals);
+    // Briefings are today-only. If state.briefings is somehow an array legacy, coerce to object.
+    const today = DateUtils.todayStr();
+    const rawBriefings = state.briefings && typeof state.briefings === 'object' && !Array.isArray(state.briefings)
+      ? state.briefings
+      : {};
+    const cleanedBriefings = {};
+    for (const d of Object.keys(rawBriefings)) {
+      if (d === today) cleanedBriefings[d] = rawBriefings[d];
+    }
+    const flatSchedule = {
+      meta: { lastUpdated: now, documentType: 'schedule' },
+      schedule: state.schedule || { days: {} },
+      morningBriefing: cleanedBriefings[today] || state.morningBriefing || null,
+      conflicts: state.conflicts || [],
+      briefings: cleanedBriefings,
+    };
+    writeJsonAtomic(DOCUMENT_FILES.schedule, flatSchedule);
+    const flatNotes = {
+      meta: { lastUpdated: now, documentType: 'notes' },
+      notes: canonicalNotes || (Array.isArray(state.notes) ? state.notes : []),
+    };
+    writeJsonAtomic(DOCUMENT_FILES.notes, flatNotes);
+
+    // Only remove the durable replay record after every projection succeeds.
+    fs.unlinkSync(recoveryPath);
 
     return state;
   });
@@ -525,6 +792,7 @@ function writeState(state) {
     _writeEmitter.emit('write', _detectChangedDocs(state));
   } catch (e) {
     // Listener errors must not affect the write path
+    process.stderr.write(`[storage] onWrite listener error: ${e.message}\n`);
   }
   return result;
 }
@@ -543,7 +811,7 @@ function readFullState() {
   // Fast path: return cached state if no sentinel files have changed
   if (!_isCacheStale()) {
     // Return a deep copy so callers can mutate the state without corrupting the cache
-    return JSON.parse(JSON.stringify(_fullStateCache.state));
+    return _deepClone(_fullStateCache.state);
   }
 
   // Slow path: full read from hierarchy + flat files
@@ -560,8 +828,8 @@ function readFullState() {
 
   const base = {};
 
-  // Read small documents (errands, review queue, reminders, userProfile)
-  const smallDocs = ['errands', 'settingsConflicts', 'reminders', 'userProfile'];
+  // Read small documents (errands, reminders, userProfile)
+  const smallDocs = ['errands', 'decisions', 'activity', 'reminders', 'userProfile'];
   for (const docType of smallDocs) {
     try {
       const filePath = _paths().DOCUMENT_FILES[docType];
@@ -573,10 +841,14 @@ function readFullState() {
     } catch {}
   }
 
-  // Read meta from state.json (theme/lang/windowBounds)
+  // Read state-only durable fields. These are not part of a split document,
+  // so omitting one here makes it disappear on the next unrelated action.
   try {
     const st = JSON.parse(fs.readFileSync(_paths().STATE_FILE, 'utf-8'));
     if (st && st.meta) base.meta = { ...st.meta };
+    for (const key of ['completedActions', 'lastReflection']) {
+      if (st && st[key] !== undefined) base[key] = st[key];
+    }
   } catch {}
 
   // Reconstruct full goals from hierarchy (index + detail files)
@@ -623,8 +895,6 @@ function readFullState() {
 
   base._hierarchyEnabled = true;
   base.meta = base.meta || {};
-  base.meta.lastUpdated = new Date().toISOString();
-
   // Populate the cache with the fresh state and current mtimes
   _fullStateCache = {
     state: base,
@@ -632,7 +902,7 @@ function readFullState() {
   };
 
   // Return a deep copy so callers can mutate without corrupting the cache
-  return JSON.parse(JSON.stringify(base));
+  return _deepClone(base);
 }
 
 // Sync state.json from flat files (primary source of truth for brain-index.js).
@@ -655,9 +925,8 @@ function syncStateJson() {
   }
 }
 
-// Sync hierarchy files from flat files.
-// Called after brain-index.js modifies flat files directly (e.g. cascadeDelete),
-// ensuring Storage.readFullState() sees the latest data.
+// Sync hierarchy files from legacy flat-file imports. Canonical entity actions
+// do not call this path; they write the hierarchy directly.
 function syncHierarchyFromFlatFiles() {
   return withLock('storage', () => {
     const state = _readLegacyFlatState();
@@ -710,15 +979,15 @@ function syncHierarchyFromFlatFiles() {
       }
     }
 
+    // Invalidate cache after hierarchy sync so readFullState sees fresh data
+    invalidateCache();
     return true;
   });
-  // Task 3.1: Invalidate cache since hierarchy files were modified directly
-  invalidateCache();
 }
 
 // Lightweight state: returns goal/note/schedule INDEXES instead of full content.
 // This is the DEFAULT state — saves tokens by not loading full goal descriptions,
-// aiReasoning, note content, or all schedule days.
+// goal detail, note content, or all schedule days.
 // Use getGoalDetail(id) / getNoteDetail(id) / getDaySchedule(date) for full content on demand.
 function readLightweightState() {
   const h = _getHierarchyInstance();
@@ -734,7 +1003,7 @@ function readLightweightState() {
 
   // Read non-goal/note/schedule fields from small documents
   const base = {};
-  const smallDocs = ['errands', 'settingsConflicts', 'reminders', 'userProfile'];
+  const smallDocs = ['errands', 'decisions', 'activity', 'reminders', 'userProfile'];
   for (const docType of smallDocs) {
     try {
       const filePath = _paths().DOCUMENT_FILES[docType];
@@ -752,7 +1021,7 @@ function readLightweightState() {
     if (st && st.meta) base.meta = { ...st.meta };
   } catch {}
 
-  // Goal index (lightweight: id, title, deadline, priority, completed, topicId, domain)
+  // Goal index (lightweight: id, title, deadline, completed, topicId, domain)
   const goalsIndex = h.getGoalsIndex();
   base.strategicGoals = goalsIndex.filter(g => g.type === 'strategic' || g.kind === 'strategic').map(goal => ({ ...goal, _lightweight: true }));
   base.currentGoals = goalsIndex.filter(g => !g.type || (g.type !== 'strategic' && g.type !== 'constraint')).map(goal => ({ ...goal, _lightweight: true }));
@@ -792,7 +1061,6 @@ function readLightweightState() {
 
   base._hierarchyEnabled = true;
   base.meta = base.meta || {};
-  base.meta.lastUpdated = new Date().toISOString();
   return base;
 }
 
@@ -817,6 +1085,12 @@ function _readLegacyFlatState() {
           if (st[key] !== undefined && merged[key] === undefined) merged[key] = st[key];
         }
       }
+      // These records have no split-document projection. A brain-index write
+      // calls syncStateJson(), so they must be copied forward instead of being
+      // silently erased by an unrelated topic/index update.
+      for (const key of ['completedActions', 'lastReflection']) {
+        if (st[key] !== undefined) merged[key] = st[key];
+      }
       if (st.meta) merged.meta = { ...st.meta };
     }
     return Object.keys(merged).length > 0 ? merged : null;
@@ -833,10 +1107,18 @@ function _readLegacyFlatState() {
 function _readScheduleMeta() {
   try {
     const data = JSON.parse(fs.readFileSync(_paths().DOCUMENT_FILES.schedule, 'utf-8'));
+    const today = DateUtils.todayStr();
+    const rawBriefings = data.briefings !== undefined ? data.briefings : {};
+    const briefings = {};
+    if (rawBriefings && typeof rawBriefings === 'object' && !Array.isArray(rawBriefings)) {
+      for (const d of Object.keys(rawBriefings)) {
+        if (d === today) briefings[d] = rawBriefings[d];
+      }
+    }
     return {
       conflicts: data.conflicts !== undefined ? data.conflicts : [],
-      morningBriefing: data.morningBriefing !== undefined ? data.morningBriefing : null,
-      briefings: data.briefings !== undefined ? data.briefings : {},
+      morningBriefing: briefings[today] !== undefined ? briefings[today] : (data.morningBriefing !== undefined ? data.morningBriefing : null),
+      briefings,
     };
   } catch {
     return { conflicts: [], morningBriefing: null, briefings: {} };
@@ -865,6 +1147,113 @@ function getDaySchedule(date) {
 function getDaysInRange(startDate, endDate) {
   const h = _getHierarchyInstance();
   return h.getDaysInRange(startDate, endDate);
+}
+
+// Patch a single goal's lifecycle fields in the flat goals.json projection.
+// This keeps brain-index (which reads flat files) consistent with hierarchy
+// detail writes without requiring a full writeState().
+function _patchGoalInFlat(goalId, detail) {
+  try {
+    const { DOCUMENT_FILES } = _paths();
+    const flat = JSON.parse(fs.readFileSync(DOCUMENT_FILES.goals, 'utf8'));
+    for (const arr of [flat.strategicGoals, flat.currentGoals, flat.constraints]) {
+      if (!Array.isArray(arr)) continue;
+      const item = arr.find(g => g.id === goalId);
+      if (item) {
+        item.lastAccessedAt = detail.lastAccessedAt;
+        item.lifecycleState = detail.lifecycleState || 'active';
+        if (detail.lifecycleState === 'active') { delete item.staleSince; delete item.archivedAt; }
+        break;
+      }
+    }
+    writeJsonAtomic(DOCUMENT_FILES.goals, flat);
+  } catch { /* flat file may not exist yet — next writeState will create it */ }
+}
+
+// Patch a single note's lifecycle fields in the flat notes.json projection.
+function _patchNoteInFlat(noteId, detail) {
+  try {
+    const { DOCUMENT_FILES } = _paths();
+    const flat = JSON.parse(fs.readFileSync(DOCUMENT_FILES.notes, 'utf8'));
+    if (!Array.isArray(flat.notes)) return;
+    const item = flat.notes.find(n => n.id === noteId);
+    if (item) {
+      item.lastAccessedAt = detail.lastAccessedAt;
+      item.lifecycleState = detail.lifecycleState || 'active';
+      if (detail.lifecycleState === 'active') { delete item.staleSince; delete item.archivedAt; }
+      writeJsonAtomic(DOCUMENT_FILES.notes, flat);
+    }
+  } catch { /* flat file may not exist yet — next writeState will create it */ }
+}
+
+// P6-6.9: Update goal's lastAccessedAt timestamp (memory freshness tracking).
+// Only rewrites the detail file — does NOT touch the index.
+// Also patches the flat projection so brain-index reads stay consistent.
+function touchGoalLastAccessed(goalId) {
+  const h = _getHierarchyInstance();
+  if (!h) return false;
+  const detail = h.getGoalDetail(goalId);
+  if (!detail) return false;
+  detail.lastAccessedAt = new Date().toISOString();
+  // Referencing a stale entity is evidence that it is useful again.  Do not
+  // let an old staleSince timestamp silently archive it later.
+  if (detail.lifecycleState === 'stale') {
+    detail.lifecycleState = 'active';
+    delete detail.staleSince;
+    delete detail.archivedAt;
+  }
+  h.writeGoal(detail);
+  _patchGoalInFlat(goalId, detail);
+  invalidateCache();
+  return true;
+}
+
+// A state write touches several projections.  Individual JSON replacements are
+// atomic, but a process interruption between projections previously left the
+// next reader to combine old and new files.  Keep one durable source snapshot
+// until every projection has been written; startup can replay it safely.
+const STATE_RECOVERY_FILE = '.state-write-recovery.json';
+function _stateRecoveryPath(dir = DATA_DIR) {
+  return dir ? path.join(dir, STATE_RECOVERY_FILE) : null;
+}
+
+function recoverPendingStateTransaction(dir) {
+  const recoveryPath = _stateRecoveryPath(dir);
+  if (!recoveryPath || !fs.existsSync(recoveryPath)) return false;
+  try {
+    const record = JSON.parse(fs.readFileSync(recoveryPath, 'utf8'));
+    if (!record || typeof record.state !== 'object' || Array.isArray(record.state)) {
+      throw new Error('recovery record does not contain a state object');
+    }
+    process.stderr.write('[storage] Replaying interrupted state write.\n');
+    writeState(record.state, { recovering: true });
+    return true;
+  } catch (error) {
+    // Do not delete a recovery record that could still preserve user data.
+    process.stderr.write(`[storage] State recovery deferred: ${error.message}\n`);
+    return false;
+  }
+}
+
+// Same lifecycle-aware access update for notes.  This is deliberately a
+// detail-store write rather than a full-state write so reading one note cannot
+// clobber unrelated changes from another client.
+// Also patches the flat projection so brain-index reads stay consistent.
+function touchNoteLastAccessed(noteId) {
+  const h = _getHierarchyInstance();
+  if (!h) return false;
+  const detail = h.getNoteDetail(noteId);
+  if (!detail) return false;
+  detail.lastAccessedAt = new Date().toISOString();
+  if (detail.lifecycleState === 'stale') {
+    detail.lifecycleState = 'active';
+    delete detail.staleSince;
+    delete detail.archivedAt;
+  }
+  h.writeNote(detail);
+  _patchNoteInFlat(noteId, detail);
+  invalidateCache();
+  return true;
 }
 
 // Write a goal to hierarchy (index + detail file)
@@ -897,6 +1286,12 @@ module.exports = {
   setDataDir,
   readDocument,
   writeDocument,
+  appendActivity,
+  readRecentActivity,
+  readPendingActivity,
+  readPendingActivityPage,
+  findPendingActivity,
+  reconcileActivityEvent,
   updateIndexTimestamp,
   readState,
   readLightweightState,
@@ -913,14 +1308,10 @@ module.exports = {
   getNoteDetail,
   getDaySchedule,
   getDaysInRange,
-  writeGoalToHierarchy,
-  writeNoteToHierarchy,
-  writeDaySchedule,
-  addItemToDay,
+  // P6-6.9: Goal memory freshness tracking
+  touchGoalLastAccessed,
+  touchNoteLastAccessed,
   // Lock management (for cross-process coordination)
-  acquireLock,
-  acquireLockBlocking,
-  releaseLock,
   isLockedByOther,
   withLock,
 };

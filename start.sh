@@ -4,7 +4,8 @@ set -e
 # ===== 知归 · AI 日程助理 启动脚本 (macOS/Linux) =====
 
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
-DATA_DIR="$APP_DIR/.zhigui"
+# Keep the desktop app and development MCP on the same canonical data folder.
+DATA_DIR="$APP_DIR/skill/.zhigui"
 SKILL_DIR="$HOME/.workbuddy/skills/zhigui"
 
 echo ""

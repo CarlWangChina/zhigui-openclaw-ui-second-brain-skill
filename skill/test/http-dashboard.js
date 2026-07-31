@@ -48,9 +48,11 @@ async function post(url, body) {
     const page = await (await fetch(base + '/')).text();
     assert.ok(page.includes('focus-hero'));
     assert.ok(page.includes('toast-region'));
-    assert.equal(page.includes('section-decisions'), false);
+    assert.equal(page.includes('section-decisions'), true);
+    assert.ok(page.includes('section-completed'));
+    assert.ok(page.includes('section-reflection'));
 
-    const goal = await post('/api/goal/add', { type: 'currentGoal', title: 'HTTP contract goal', priority: 70 });
+    const goal = await post('/api/goal/add', { type: 'currentGoal', title: 'HTTP contract goal' });
     assert.equal(goal.goal.type, 'current');
     const errand = await post('/api/errand/add', { title: 'HTTP contract errand', date: '2026-07-22' });
     assert.equal(errand.errand.title, 'HTTP contract errand');
@@ -64,6 +66,15 @@ async function post(url, body) {
     assert.equal(note.note.needsEnrichment, true);
     const imported = await post('/api/note/add', { content: 'A previous note kept in its original wording.' });
     assert.equal(imported.note.needsEnrichment, true);
+    const topicNote = await post('/api/note/add', {
+      title: 'Topic detail boundary', content: 'This body belongs behind the individual-note read.',
+      topic: 'HTTP retrieval boundary', category: 'Test',
+    });
+    const retiredImport = await fetch(base + '/api/note/import', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base },
+      body: JSON.stringify({ notes: [{ title: 'Imported batch note', content: 'This must be attached in chat instead.' }] }),
+    });
+    assert.equal(retiredImport.status, 404, 'the dashboard must not queue file imports for a later AI conversation');
     await post('/api/task/toggle', { date: '2026-07-22', taskId: event.task.id });
     await post('/api/goal/complete', { id: goal.goal.id, completed: true });
     const deletedTask = await post('/api/task/delete', { date: '2026-07-22', taskId: event.task.id });
@@ -73,8 +84,23 @@ async function post(url, body) {
     assert.equal(state.currentGoals[0].completed, true);
     assert.equal(state.errands.length, 1);
     assert.equal(state.notes[0].title, '待 AI 归纳');
-    assert.equal(state.notes.some(item => item.id === imported.note.id && item.content.includes('original wording')), true);
+    assert.equal(state.notes.some(item => item.id === imported.note.id && Object.hasOwn(item, 'content')), false,
+      'the dashboard state must return note summaries rather than every note body');
+    assert.equal(state.notes.some(item => Object.hasOwn(item, 'contentPreview')), false,
+      'the dashboard state must not return truncated note text either');
+    const noteDetail = await (await fetch(base + '/api/note?noteId=' + encodeURIComponent(imported.note.id))).json();
+    assert.ok(noteDetail.note.content.includes('original wording'), 'one expanded note must load its own full body on demand');
+    const topics = await (await fetch(base + '/api/topics')).json();
+    const topic = topics.topics.find(item => item.label === 'HTTP retrieval boundary');
+    assert.ok(topic, 'the organized note must appear in the topic index');
+    const topicDetail = await (await fetch(base + '/api/topic?topicId=' + encodeURIComponent(topic.id))).json();
+    assert.equal(topicDetail.notes.some(item => item.id === topicNote.note.id && Object.hasOwn(item, 'content')), false,
+      'topic detail must expose linked note titles without transferring their bodies');
     assert.equal(state.schedule.days['2026-07-22'].tasks.some(task => task.id === event.task.id), false);
+    const retiredWrite = await fetch(base + '/api/state', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base }, body: JSON.stringify(state),
+    });
+    assert.equal(retiredWrite.status, 410, 'the dashboard must reject full-state replacement');
     console.log('PASS http-dashboard');
   } finally {
     child.kill();

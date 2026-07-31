@@ -28,22 +28,22 @@ console.log('--- Section 1: Goal Management ---');
 
 // TC-GOAL-1: Add strategic goal, current goal, and constraint — verify types, IDs, and fields
 {
-  const sg = Actions.execute('goal.add', { type: 'strategicGoal', title: 'SG1', description: 'desc1', priority: 70 });
+  const sg = Actions.execute('goal.add', { type: 'strategicGoal', title: 'SG1', description: 'desc1' });
   assert.equal(sg.success, true);
   assert.ok(sg.goal.id.startsWith('goal_'));
   assert.equal(sg.goal.type, 'strategic');
   assert.equal(sg.goal.title, 'SG1');
   assert.equal(sg.goal.description, 'desc1');
-  assert.equal(sg.goal.priority, 70);
+  assert.equal(Object.hasOwn(sg.goal, 'priority'), false);
   assert.equal(sg.goal.completed, false);
 
-  const cg = Actions.execute('goal.add', { type: 'currentGoal', title: 'CG1', priority: 80 });
+  const cg = Actions.execute('goal.add', { type: 'currentGoal', title: 'CG1' });
   assert.equal(cg.success, true);
   assert.ok(cg.goal.id.startsWith('goal_'));
   assert.equal(cg.goal.type, 'current');
   assert.equal(cg.goal.title, 'CG1');
 
-  const ct = Actions.execute('goal.add', { type: 'constraint', title: 'CT1', priority: 90 });
+  const ct = Actions.execute('goal.add', { type: 'constraint', title: 'CT1' });
   assert.equal(ct.success, true);
   assert.ok(ct.goal.id.startsWith('constraint_'));
   assert.equal(ct.goal.type, 'constraint');
@@ -53,7 +53,7 @@ console.log('--- Section 1: Goal Management ---');
 
 // TC-GOAL-2: Complete a current goal — verify completed flag, completedAt set
 {
-  const g = Actions.execute('goal.add', { type: 'currentGoal', title: 'CompleteMe', priority: 50 });
+  const g = Actions.execute('goal.add', { type: 'currentGoal', title: 'CompleteMe' });
   const result = Actions.execute('goal.complete', { id: g.goal.id, completed: true });
   assert.equal(result.completed, true);
   assert.ok(result.goal.completedAt);
@@ -78,16 +78,13 @@ console.log('--- Section 1: Goal Management ---');
   count++;
 }
 
-// TC-GOAL-4: Add goal with priority override — verify locked=true, prioritySource='user'
+// TC-GOAL-4: Numeric priority input is ignored and never persisted.
 {
-  const g = Actions.execute('goal.add', { type: 'currentGoal', title: 'PrioOverride', priority: 95 });
-  // Now update its priority to lock it
-  const result = Actions.execute('priority.update', { type: 'currentGoal', id: g.goal.id, priority: 99 });
-  assert.equal(result.locked, true);
+  const g = Actions.execute('goal.add', { type: 'currentGoal', title: 'NoNumericPriority', priority: 95 });
   const state = Storage.readFullState();
   const goal = state.currentGoals.find(x => x.id === g.goal.id);
-  assert.equal(goal.locked, true);
-  assert.equal(goal.prioritySource, 'user');
+  assert.equal(Object.hasOwn(goal, 'priority'), false);
+  assert.equal(Object.hasOwn(goal, 'locked'), false);
   count++;
 }
 
@@ -98,7 +95,7 @@ const TASK_DATE = '2026-07-23';
 
 // TC-TASK-1: Add event/task via event.add — verify manualLocked=true, correct time/duration
 {
-  const ev = Actions.execute('event.add', { date: TASK_DATE, time: '10:00', title: 'Task1', duration: 45, priority: 70 });
+  const ev = Actions.execute('event.add', { date: TASK_DATE, time: '10:00', title: 'Task1', duration: 45 });
   assert.equal(ev.success, true);
   assert.equal(ev.task.manualLocked, true);
   assert.ok(ev.task.manualLockedAt);
@@ -149,72 +146,58 @@ const TASK_DATE = '2026-07-23';
   count++;
 }
 
-// --- Section 3: Priority System ---
-console.log('--- Section 3: Priority System ---');
+// --- Section 3: Errand System ---
+console.log('--- Section 3: Errand System ---');
 
-// TC-PRIO-1: Update priority — verify locked=true, priorityOverride set
+// TC-ERRAND-1: Add must-level errand — verify commitmentLevel='must'
 {
-  const g = Actions.execute('goal.add', { type: 'currentGoal', title: 'PrioGoal1', priority: 50 });
-  const result = Actions.execute('priority.update', { type: 'currentGoal', id: g.goal.id, priority: 88 });
-  assert.equal(result.locked, true);
-  assert.equal(result.priority, 88);
-  const state = Storage.readFullState();
-  const goal = state.currentGoals.find(x => x.id === g.goal.id);
-  assert.equal(goal.locked, true);
-  assert.ok(goal.priorityOverride);
-  assert.equal(goal.priorityOverride.strength, 'hard');
-  assert.equal(goal.priorityOverride.source, 'user');
+  const e = Actions.execute('errand.add', { title: 'MustErrand', date: '2026-07-23', commitmentLevel: 'must' });
+  assert.equal(e.errand.commitmentLevel, 'must');
   count++;
 }
 
-// TC-PRIO-2: Unlock priority — verify locked=false, strength changes to 'soft'
+// TC-ERRAND-2: Add should-level errand — verify commitmentLevel='should'
 {
-  const g = Actions.execute('goal.add', { type: 'currentGoal', title: 'PrioGoal2', priority: 60 });
-  Actions.execute('priority.update', { type: 'currentGoal', id: g.goal.id, priority: 75 });
-  const result = Actions.execute('priority.unlock', { type: 'currentGoal', id: g.goal.id });
-  assert.equal(result.locked, false);
-  const state = Storage.readFullState();
-  const goal = state.currentGoals.find(x => x.id === g.goal.id);
-  assert.equal(goal.locked, false);
-  assert.equal(goal.priorityOverride.strength, 'soft');
+  const e = Actions.execute('errand.add', { title: 'ShouldErrand', date: '2026-07-23', commitmentLevel: 'should' });
+  assert.equal(e.errand.commitmentLevel, 'should');
   count++;
 }
 
-// --- Section 4: Errand System ---
-console.log('--- Section 4: Errand System ---');
-
-// TC-ERRAND-1: Add must-level errand — verify priority='must'
+// TC-ERRAND-2b: A fixed date without time is a date-fixed commitment, while no
+// date remains genuinely unscheduled.
 {
-  const e = Actions.execute('errand.add', { title: 'MustErrand', date: '2026-07-23', priority: 'must' });
-  assert.equal(e.errand.priority, 'must');
+  const fixed = Actions.execute('errand.add', { title: 'Concert', date: '2026-08-01', commitmentLevel: 'must' });
+  const unscheduled = Actions.execute('errand.add', { title: 'Decide weekend plan' });
+  assert.equal(fixed.errand.date, '2026-08-01');
+  assert.equal(fixed.errand.time, '');
+  assert.equal(unscheduled.errand.date, null);
   count++;
 }
 
-// TC-ERRAND-2: Add should-level errand — verify priority='should'
+// TC-ERRAND-3: Complete errand — verify moved to completedActions, removed from active errands
 {
-  const e = Actions.execute('errand.add', { title: 'ShouldErrand', date: '2026-07-23', priority: 'should' });
-  assert.equal(e.errand.priority, 'should');
-  count++;
-}
-
-// TC-ERRAND-3: Complete transient errand — verify discarded=true, removed from state
-{
-  const e = Actions.execute('errand.add', { title: 'TransientErrand', date: '2026-07-23', priority: 'nice', retention: 'transient' });
+  const e = Actions.execute('errand.add', { title: 'TransientErrand', date: '2026-07-23', commitmentLevel: 'nice', retention: 'transient' });
   const result = Actions.execute('errand.complete', { id: e.errand.id });
-  assert.equal(result.discarded, true);
-  const state = Storage.readFullState();
-  assert.ok(!state.errands.some(x => x.id === e.errand.id));
-  count++;
-}
-
-// TC-ERRAND-4: Complete review-retention errand — verify NOT discarded
-{
-  const e = Actions.execute('errand.add', { title: 'ReviewErrand', date: '2026-07-23', priority: 'should', retention: 'review' });
-  const result = Actions.execute('errand.complete', { id: e.errand.id });
-  assert.equal(result.discarded, undefined);
+  assert.equal(result.discarded, false);
   assert.equal(result.completed, true);
+  assert.ok(result.action, 'should return completed action record');
+  assert.equal(result.action.errandId, e.errand.id);
   const state = Storage.readFullState();
-  assert.ok(state.errands.some(x => x.id === e.errand.id));
+  assert.ok(!state.errands.some(x => x.id === e.errand.id), 'should be removed from active errands');
+  assert.ok(state.completedActions.some(x => x.errandId === e.errand.id), 'should be in completedActions');
+  count++;
+}
+
+// TC-ERRAND-4: Complete errand — verify all completions go to completedActions with correct pattern
+{
+  const e = Actions.execute('errand.add', { title: 'ReviewErrand', date: '2026-07-23', commitmentLevel: 'should', retention: 'review' });
+  const result = Actions.execute('errand.complete', { id: e.errand.id });
+  assert.equal(result.completed, true);
+  assert.ok(result.action, 'should return completed action record');
+  assert.equal(result.action.pattern, 'one-time');
+  const state = Storage.readFullState();
+  assert.ok(!state.errands.some(x => x.id === e.errand.id), 'should be removed from active errands');
+  assert.ok(state.completedActions.some(x => x.errandId === e.errand.id), 'should be in completedActions');
   count++;
 }
 
@@ -267,7 +250,6 @@ console.log('--- Section 6: One-shot Goal Behavior ---');
     title: 'OneShotGoal',
     isOneShot: true,
     completed: false,
-    priority: 80,
     source: 'manual',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -306,7 +288,6 @@ console.log('--- Section 6: One-shot Goal Behavior ---');
     title: 'OneShotFuture',
     isOneShot: true,
     completed: false,
-    priority: 80,
     source: 'manual',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -394,9 +375,9 @@ console.log('--- Section 8: Scheduler Sub-functions ---');
 // TC-SCHED-1: computePhaseRanges — verify phase goals get date ranges
 {
   const goals = [
-    { id: 'g1', baseTitle: 'Phase A', deadline: '2026-08-01', priority: 50 },
-    { id: 'g2', baseTitle: 'Phase A', deadline: '2026-08-15', priority: 50 },
-    { id: 'g3', title: 'Standalone', priority: 60 },
+    { id: 'g1', baseTitle: 'Phase A', deadline: '2026-08-01' },
+    { id: 'g2', baseTitle: 'Phase A', deadline: '2026-08-15' },
+    { id: 'g3', title: 'Standalone' },
   ];
   const { phaseRanges, activeGoals } = Scheduler.computePhaseRanges(goals, '2026-07-23');
   assert.equal(phaseRanges.size, 2); // g1 and g2 have phases; g3 is standalone

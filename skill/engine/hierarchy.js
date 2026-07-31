@@ -5,12 +5,12 @@
  *
  * Architecture:
  *   Index files (small, always loaded):
- *     goals-index.json     — [{id, title, deadline, priority, completed, topicId, domain}]
+ *     goals-index.json     — [{id, title, deadline, completed, topicId, domain}]
  *     notes-index.json     — [{id, title, category, topicId, createdAt, needsEnrichment}]
  *     schedule-index.json  — { "2026-08-01": {taskCount, errandCount}, ... }
  *
  *   Detail files (larger, loaded on demand):
- *     goals/g_xxx.json     — full goal object (description, detail, aiReasoning, aiFactors, ...)
+ *     goals/g_xxx.json     — full goal object (description, detail, context, ...)
  *     notes/n_xxx.json     — full note object (content, sourceEventId, ...)
  *     schedule/2026-08-01.json — that day's tasks, errands, notes
  *
@@ -24,6 +24,7 @@
 const fs = require('fs');
 const path = require('path');
 const Storage = require('./storage');
+const DateUtils = require('./date-utils');
 const { GOAL_INDEX_FIELDS, NOTE_INDEX_FIELDS, pickIndexFields } = require('./constants');
 
 class Hierarchy {
@@ -61,7 +62,7 @@ class Hierarchy {
 
   /**
    * Get the lightweight goal index (always loaded, small).
-   * Returns: [{id, title, deadline, priority, completed, topicId, domain, category}]
+   * Returns: [{id, title, deadline, completed, topicId, domain, category}]
    */
   getGoalsIndex() {
     const idx = this._read(this.files.goalsIndex, { goals: [] });
@@ -70,7 +71,7 @@ class Hierarchy {
 
   /**
    * Get full goal detail (loaded on demand).
-   * Returns the complete goal object including description, aiReasoning, etc.
+   * Returns the complete goal object including description and context.
    */
   getGoalDetail(goalId) {
     const filePath = path.join(this.goalsDir, `${goalId}.json`);
@@ -86,9 +87,9 @@ class Hierarchy {
     // Update index with lightweight fields (Task 1.3: uses GOAL_INDEX_FIELDS from constants.js)
     const idx = this._read(this.files.goalsIndex, { goals: [] });
     const indexEntry = pickIndexFields(goal, GOAL_INDEX_FIELDS, {
-      type: 'current', title: '', deadline: null, priority: 50,
-      completed: false, locked: false, topicId: null, domain: 'misc',
-      category: null, estimatedHours: null, scoreSource: 'rule',
+      type: 'current', title: '', deadline: null,
+      completed: false, topicId: null, domain: 'misc',
+      category: null, estimatedHours: null,
       baseTitle: null, phaseName: null, relatedStrategicGoalId: null,
     });
     const existing = idx.goals.findIndex(g => g.id === goal.id);
@@ -113,9 +114,9 @@ class Hierarchy {
       if (!goal || !goal.id) continue;
       // Task 1.3: uses GOAL_INDEX_FIELDS — normalized with writeGoal (no description/detail in index)
       const indexEntry = pickIndexFields(goal, GOAL_INDEX_FIELDS, {
-        type: 'current', title: '', deadline: null, priority: 50,
-        completed: false, locked: false, topicId: null, domain: 'misc',
-        category: null, estimatedHours: null, scoreSource: 'rule',
+        type: 'current', title: '', deadline: null,
+        completed: false, topicId: null, domain: 'misc',
+        category: null, estimatedHours: null,
         baseTitle: null, phaseName: null, relatedStrategicGoalId: null,
       });
       const existing = idx.goals.findIndex(g => g.id === goal.id);
@@ -143,7 +144,7 @@ class Hierarchy {
 
   /**
    * Update only the index fields (without rewriting the detail file).
-   * Used by recalcPriorities which only changes priority/daysLeft/overdue.
+   * Used when writing lightweight goal metadata.
    */
   updateGoalIndex(goalId, fields) {
     const idx = this._read(this.files.goalsIndex, { goals: [] });
@@ -283,7 +284,7 @@ class Hierarchy {
     const start = new Date(startDate);
     const end = new Date(endDate);
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      const dateStr = d.toISOString().slice(0, 10);
+      const dateStr = DateUtils.formatDate(d);
       if (index[dateStr]) {
         result[dateStr] = this.getDaySchedule(dateStr);
       }

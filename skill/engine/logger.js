@@ -19,6 +19,7 @@ const IS_DEV = process.env.ZHIGUI_DEV === '1';
 let _logDir = null;
 let _currentDate = null;
 let _currentStream = null;
+let _streamError = false;
 
 /**
  * 初始化日志目录
@@ -47,7 +48,8 @@ function _openStream() {
   _currentDate = _dateStr();
   const logFile = path.join(_logDir, `${_currentDate}.log`);
   _currentStream = fs.createWriteStream(logFile, { flags: 'a' });
-  _currentStream.on('error', () => { _logDir = null; });
+  _streamError = false;
+  _currentStream.on('error', () => { _streamError = true; });
   // 清理过期日志
   _cleanOldLogs();
 }
@@ -59,7 +61,7 @@ function _openStream() {
 function _checkRotation() {
   if (!_logDir || !_currentStream) return;
   const today = _dateStr();
-  if (today !== _currentDate) {
+  if (today !== _currentDate || _streamError) {
     _currentStream.end();
     _openStream();
     return;

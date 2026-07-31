@@ -12,6 +12,14 @@ if not exist "%SERVER_JS%" (
   exit /b 1
 )
 
+where node >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] Node.js not found in PATH.
+  echo Please install Node.js ^(https://nodejs.org^) and add it to PATH.
+  pause
+  exit /b 1
+)
+
 echo Starting ZhiGui dashboard at http://localhost:7788 ...
 echo (Press Ctrl+C to stop)
 echo.

@@ -7,9 +7,10 @@
 let state = {};
 let history = {};
 let collapsed = false;   // Fixed expanded panel, no floating ball
-let currentDayOffset = 0;  // 0 = today, -1 = yesterday, 1 = tomorrow
+// Keep the viewed calendar day as an absolute local date. A relative offset drifts
+// when the panel remains open across midnight.
+let selectedDate = null;
 let theme = 'dark';
-let priorityModalContext = null;  // { type, id, name, currentPriority }
 let goalModalType = null;  // 'strategicGoal' or 'constraint'
 let evtSource = null;
 let currentView = (() => {
@@ -31,6 +32,38 @@ let isRendering = false;
 let isPointerDown = false;
 let lastSeenVersion = 0;
 let pendingRenderReason = null;
+// Context is persisted on the action. This set controls only whether its details are open in the panel.
+const expandedActionContexts = new Set();
+const noteDetails = new Map();
+const PAGE_SIZE = { goals: 12, decisions: 10, errands: 12, notes: 12, topics: 12 };
+const visibleCounts = {
+  goals: PAGE_SIZE.goals,
+  decisions: PAGE_SIZE.decisions,
+  errands: PAGE_SIZE.errands,
+  notes: PAGE_SIZE.notes,
+  topics: PAGE_SIZE.topics,
+};
+
+function moreLabel(remaining) {
+  return lang === 'zh' ? `查看其余 ${remaining} 条` : `Show ${remaining} more`;
+}
+
+function renderMoreButton(section, shown, total) {
+  const remaining = Math.max(0, total - shown);
+  if (!remaining) return '';
+  return `<button type="button" class="list-more-btn" onclick="showMore('${section}')">${moreLabel(remaining)}</button>`;
+}
+
+function showMore(section) {
+  if (!Object.hasOwn(PAGE_SIZE, section)) return;
+  visibleCounts[section] += PAGE_SIZE[section];
+  const renderers = { goals: renderGoals, decisions: renderDecisions, errands: renderErrands, notes: renderNotes };
+  if (section === 'topics') {
+    renderTopics();
+    return;
+  }
+  renderers[section]?.();
+}
 
 // Track pointer state for click protection during render
 document.addEventListener('pointerdown', () => { isPointerDown = true; }, { passive: true, capture: true });
@@ -49,55 +82,64 @@ const I18N = {
   zh: {
     'app.subtitle': '决策与规划助理',
     'view.today': '今日', 'view.knowledge': '知识库', 'view.all': '全部',
-    'section.briefing': '今日判断', 'section.schedule': '今日行动',
-    'section.goals': '目标', 'section.constraints': '限制', 'section.relatedNotes': '相关笔记',
+    'section.briefing': '今日建议', 'section.schedule': '今日行动',
+    'section.goals': '目标', 'section.constraints': '限制',
     'section.current': '当前目标', 'section.events': '事件流',
-    'section.errands': '待安排事项', 'section.notes': '生活笔记',
+    'section.errands': '待安排事项', 'section.completed': '今日已完成', 'section.notes': '笔记',
+    'action.timePending': '时间待定',
     'section.topics': '主题库',
+    'section.decisions': '决策记录', 'section.reflection': '每日复盘',
+    'empty.decisions': '暂无决策记录', 'empty.reflection': '今天还没有完成的行动',
+    'decision.accepted': '已采纳', 'decision.rejected': '已拒绝', 'decision.pending': '待决定',
+    'decision.reversed': '已撤销', 'decision.expired': '已过期', 'decision.resolved': '已结束跟踪',
+    'reflection.completed': '今日完成', 'reflection.health': '目标关注信号',
+    'reflection.suggestions': 'AI 建议',
+    'goal.why': '为什么重要', 'goal.obstacle': '当前障碍', 'goal.status': '当前状态',
+    'goal.nextStep': '下一步', 'goal.linkedNotes': '关联笔记',
+    'goal.signal.actionable': '可推进', 'goal.signal.needs_confirmation': '待确认', 'goal.signal.blocked': '有阻碍', 'goal.signal.at_risk': '存在风险', 'goal.signal.on_track': '进展正常',
     'empty.goals': '暂无目标', 'errand.all': '全部', 'goal.expand': '点击展开查看衍生任务', 'goal.derivedTasks': '衍生任务', 'goal.derivedGoals': '子目标', 'goal.noDerived': '暂无衍生内容',
     'goal.markComplete': '标记完成', 'goal.markIncomplete': '撤销完成',
     'briefing.must': '必须完成', 'briefing.rec': '今日推荐', 'briefing.not': '不建议', 'briefing.strategic': '战略提醒', 'briefing.dailyQuote': '每日一言',
     'tooltip.pin': '固定', 'tooltip.close': '关闭', 'tooltip.theme': '切换主题', 'tooltip.lang': '语言', 'tooltip.collapse': '收起',
     'unit.pts': '分',
     'btn.addEvent': '添加事件', 'btn.cancel': '取消', 'btn.confirm': '确认',
-    'modal.priority.title': '调整优先级', 'modal.priority.hint': '你的选择会被保留；需要时可随时解锁，也可以让 AI 提供不同方案。',
     'modal.event.title': '添加事件',
     'modal.time.title': '编辑时间', 'modal.time.hint': '清空时间后，此行动会回到“待安排事项”。',
     'modal.actionDelete.title': '删除行动', 'modal.actionDelete.hint': '这会将这条行动从当前列表移除，且无法撤销。', 'modal.actionDelete.btn': '删除行动',
     'note.tab.unclassified': '未分类', 'topic.unclassified.meta': '{n} 条 · 等待 AI 整理', 'note.contentMissing': '此历史笔记缺少可读取的原文。',
-    'settings.pending': '待确认 {n}', 'modal.review.title': '待确认的整理与冲突', 'modal.review.empty': '暂时没有待确认的问题。', 'review.organization': 'AI 整理建议', 'review.conflict': '设置冲突', 'review.accept': '采纳整理', 'review.reject': '保留原文', 'review.done': '已处理', 'review.question': '需要你确认',
     'form.date': '日期', 'form.time': '时间', 'form.title': '标题', 'form.desc': '描述（可选）',
     'modal.conflict.title': '冲突详情', 'modal.conflict.ok': '知道了',
     'modal.goal.title.strategic': '添加战略目标', 'modal.goal.title.constraint': '添加限制',
     'modal.goal.hint': '这是当前偏好，不是永久规则；知归会在有充分理由时提出调整建议。',
-    'form.priority': '优先级',
+    'form.commitment': '承诺级别',
     'modal.errand.title': '添加事项', 'form.duration': '时长（分钟）', 'form.note': '备注（可选）',
     'errand.opt.must': '必须 - 今天做', 'errand.opt.should': '应该 - 尽可能做', 'errand.opt.nice': '可选 - 有空时做',
-    'modal.topicDelete.title': '确认级联删除', 'modal.topicDelete.warn': '这将同时删除该主题下所有关联的目标、日程任务、琐事与笔记，且不可撤销。', 'modal.topicDelete.btn': '确认级联删除',
+    'modal.topicDelete.title': '删除主题与其笔记', 'modal.topicDelete.warn': '只删除属于该主题的笔记。关联目标、琐事和日程任务会保留，但会移除已删笔记和主题的关联。', 'modal.topicDelete.btn': '删除主题与笔记',
     'kb.search.ph': '搜索：考试 / 面试 / 智齿…', 'kb.search.btn': '搜索',
     'kb.category.all': '全部分类', 'kb.threshold': '沉淀阈值 {n}',
     'calendar.backToday': '回到今天', 'calendar.legend.arranged': '已排程', 'calendar.legend.today': '今天',
     'calendar.weekdays': '日一二三四五六',
     'topic.empty': '还没有主题。<br>AI 会在整理笔记时判断主题与分类，<br>并逐步构建主题库。',
     'topic.chip.precip': '已归纳', 'topic.chip.active': '活跃',
-    'topic.cascade.btn': '级联删除全部',
+    'topic.cascade.btn': '删除主题与笔记',
     'topic.reindex': '重建索引',
     'topic.reindexDone': '索引已重建！扫描了 {goals} 个目标、{notes} 条笔记、{errands} 项琐事。新建 {topicsCreated} 个主题，建立 {topicsLinked} 条关联。',
     'topic.reindexFail': '重建索引失败：',
     'lastUpdated.prefix': '最后更新：',
     'collapsed.tip': '今日 {c}/{t} · {p}%  |  点击展开 · 拖拽移动',
-    'src.manual': '手动', 'src.ai': 'AI', 'task.record.manual': '手动录入', 'task.record.ai': 'AI 生成',
-    'status.pending': '待处理', 'status.clarifying': '澄清中', 'status.resolved': '已解决', 'status.archived': '已归档',
+    'src.manual': '手动', 'src.ai': 'AI', 'src.recurring': '周期', 'task.record.manual': '手动录入', 'task.record.ai': 'AI 生成', 'task.record.recurring': '周期预排',
+    'status.pending': '待处理', 'status.clarifying': '澄清中', 'status.resolved': '已解决',
     'domain.health': '健康', 'domain.relationship': '关系', 'domain.career': '职业', 'domain.academic': '学业', 'domain.social': '社交', 'domain.misc': '其他',
     'errand.must': '必须', 'errand.should': '应该', 'errand.nice': '可选',
     'empty.strategic': '暂无战略目标<br>点击右上角 + 添加，或在对话中告诉 AI',
     'empty.constraints': '暂无限制<br>点击右上角 + 添加',
     'empty.current': '暂无当前目标',
     'goal.current': '当前目标',
-    'empty.errands': '暂无待安排事项',
-    'empty.notes': '还没有笔记<br><span style="font-size:11px">可以在对话中让 AI 记录，也可以在上方暂存原文</span>',
-    'note.all': '全部', 'note.input.ph': '记录一段原始信息…', 'note.aiHint': '这里只记录原文，标题、主题和分类会由 AI 归纳。',
-    'note.addBtn': '＋ 记录笔记',
+    'empty.errands': '暂无待安排事项', 'empty.completed': '暂无已完成事项',
+    'completed.aiFollowup': '已记录到面板。AI 不会主动弹出；如需复盘、更新目标或安排后续，请开启一次对话，让它读取这次完成。',
+    'empty.notes': '还没有笔记<br><span style="font-size:11px">文件请直接附加到聊天框，由 AI 在当前对话中总结和分类</span>',
+    'note.all': '全部', 'note.input.ph': '记录一段原始信息…', 'note.aiHint': '面板记录的是你已确认的标题、主题和正文。',
+    'note.addBtn': '＋ 记录笔记', 'note.chatImportHint': '需要 AI 总结、分类的文件，请直接附加到聊天框；AI 会在当前对话处理。',
     'modal.note.title': '记录笔记',
     'note.field.title': '标题', 'note.field.title.ph': '例如：考试报名截止提醒',
     'note.field.content': '内容',
@@ -112,14 +154,14 @@ const I18N = {
     'briefing.overdue': '逾期', 'briefing.plan': '按计划执行 {n} 项任务', 'briefing.none': '暂无建议',
     'briefing.constraint': '避免超出限制安排（{title}）',
     'briefing.push': '{title}：每天坚持推进',
-    'briefing.empty': '运行 AI 自动排程以生成今日晨报',
+    'briefing.empty': '等待 AI 阅读今日上下文后写入晨报',
     'confirm.deleteGoal': '删除“{title}”？',
     'confirm.deleteErrand': '删除事项“{title}”？',
     'confirm.deleteNote': '删除这条笔记？',
     'alert.eventRequired': '请填写日期、时间和标题',
     'alert.goalRequired': '请输入标题',
     'alert.errandRequired': '请输入事项标题',
-    'errand.done': '标记未完成', 'errand.undo': '标记完成',
+    'errand.done': '标记未完成', 'errand.undo': '标记完成', 'errand.undoComplete': '恢复', 'errand.completed': '已完成', 'errand.doneToday': '今日已完成',
     'topic.noteEmpty': '暂无笔记', 'topic.relNone': '暂无其他关联',
     'kb.noHits': '未找到匹配项',
     'today': '今天',
@@ -143,9 +185,7 @@ const I18N = {
     'task.followup': '💡 Follow up: {title} ({n}d left)', 'task.followup.unknown': '💡 Follow up: {title}',
     'task.phase': '[{phase}] {title}',
     'task.exercise': 'Exercise', 'task.exercise.desc': 'Daily exercise (constraint)',
-    'task.errand.desc': 'Errand ({priority})',
     'task.locked': '时间由你设定；可继续修改，AI 不会自动覆盖',
-    'priority.origin.ai': 'AI 建议', 'priority.origin.manual': '你的设定', 'priority.origin.pending': '待 AI 评估',
     'task.editTimePrompt': 'Enter new time (HH:MM format, e.g. 09:30):',
     'task.editDurationPrompt': 'Enter duration in minutes (e.g. 60):',
     'task.invalidTime': 'Invalid time format. Please use HH:MM (e.g. 09:30).',
@@ -164,55 +204,64 @@ const I18N = {
   en: {
     'app.subtitle': 'Decision & Planning Companion',
     'view.today': 'Today', 'view.knowledge': 'Knowledge', 'view.all': 'All',
-    'section.briefing': 'Decision check', 'section.schedule': "Today's Actions",
-    'section.goals': 'Goals', 'section.constraints': 'Constraints', 'section.relatedNotes': 'Relevant notes',
+    'section.briefing': "Today's guidance", 'section.schedule': "Today's Actions",
+    'section.goals': 'Goals', 'section.constraints': 'Constraints',
     'section.current': 'Current Goals', 'section.events': 'Event Stream',
-    'section.errands': 'Unscheduled actions', 'section.notes': 'Life Notes',
+    'section.errands': 'Unscheduled actions', 'section.completed': 'Completed Today', 'section.notes': 'Notes',
+    'action.timePending': 'Time pending',
     'section.topics': 'Topic Library',
+    'section.decisions': 'Decision Records', 'section.reflection': 'Daily Reflection',
+    'empty.decisions': 'No decision records yet', 'empty.reflection': 'No completed actions today',
+    'decision.accepted': 'Accepted', 'decision.rejected': 'Rejected', 'decision.pending': 'Pending',
+    'decision.reversed': 'Reversed', 'decision.expired': 'Expired', 'decision.resolved': 'Tracking ended',
+    'reflection.completed': 'Completed Today', 'reflection.health': 'Goal Signals',
+    'reflection.suggestions': 'AI Suggestions',
+    'goal.why': 'Why it matters', 'goal.obstacle': 'Current obstacle', 'goal.status': 'Current status',
+    'goal.nextStep': 'Next step', 'goal.linkedNotes': 'Linked notes',
+    'goal.signal.actionable': 'Actionable', 'goal.signal.needs_confirmation': 'Needs confirmation', 'goal.signal.blocked': 'Blocked', 'goal.signal.at_risk': 'At risk', 'goal.signal.on_track': 'On track',
     'empty.goals': 'No goals', 'errand.all': 'All', 'goal.expand': 'Click to view derived tasks', 'goal.derivedTasks': 'Derived tasks', 'goal.derivedGoals': 'Sub-goals', 'goal.noDerived': 'No derived items yet',
     'goal.markComplete': 'Mark complete', 'goal.markIncomplete': 'Undo complete',
     'briefing.must': 'Must Complete', 'briefing.rec': 'Today\'s Pick', 'briefing.not': 'Not Recommended', 'briefing.strategic': 'Strategic Reminder', 'briefing.dailyQuote': 'Daily Quote',
     'tooltip.pin': 'Toggle Pin', 'tooltip.close': 'Close', 'tooltip.theme': 'Toggle Theme', 'tooltip.lang': 'Language', 'tooltip.collapse': 'Collapse',
     'unit.pts': 'pts',
     'btn.addEvent': 'Add Event', 'btn.cancel': 'Cancel', 'btn.confirm': 'Confirm',
-    'modal.priority.title': 'Adjust Priority', 'modal.priority.hint': 'Your choice is preserved until you release it; AI can still explain alternatives.',
     'modal.event.title': 'Add Event',
     'modal.time.title': 'Edit time', 'modal.time.hint': 'Clear the time to move this action back to Unscheduled actions.',
     'modal.actionDelete.title': 'Delete action', 'modal.actionDelete.hint': 'This removes the action from the current list and cannot be undone.', 'modal.actionDelete.btn': 'Delete action',
     'note.tab.unclassified': 'Unclassified', 'topic.unclassified.meta': '{n} notes · AI review pending', 'note.contentMissing': 'This historical note has no readable source text.',
-    'settings.pending': '{n} to review', 'modal.review.title': 'Organization & conflict review', 'modal.review.empty': 'Nothing needs your confirmation right now.', 'review.organization': 'AI organization proposal', 'review.conflict': 'Setting conflict', 'review.accept': 'Accept organization', 'review.reject': 'Keep source text', 'review.done': 'Mark handled', 'review.question': 'Your confirmation is needed',
     'form.date': 'Date', 'form.time': 'Time', 'form.title': 'Title', 'form.desc': 'Description (optional)',
     'modal.conflict.title': 'Conflict Detail', 'modal.conflict.ok': 'Got it',
     'modal.goal.title.strategic': 'Add Strategic Goal', 'modal.goal.title.constraint': 'Add Constraint',
     'modal.goal.hint': 'This is a current preference, not a permanent rule. ZhiGui may suggest changes with reasons.',
-    'form.priority': 'Priority',
+    'form.commitment': 'Commitment level',
     'modal.errand.title': 'Add action', 'form.duration': 'Duration (min)', 'form.note': 'Note (optional)',
     'errand.opt.must': 'Must - do today', 'errand.opt.should': 'Should - today if possible', 'errand.opt.nice': 'Nice - if free',
-    'modal.topicDelete.title': 'Confirm Cascade Delete', 'modal.topicDelete.warn': 'This will also delete all related events, goals, schedule tasks, errands and notes under this topic. This cannot be undone.', 'modal.topicDelete.btn': 'Confirm Cascade Delete',
-    'kb.search.ph': 'Search: exam / interview / wisdom tooth…', 'kb.search.btn': 'Search',
+    'modal.topicDelete.title': 'Delete topic and owned notes', 'modal.topicDelete.warn': 'Only notes owned by this topic are deleted. Related goals, errands and schedule items stay, with deleted-note and topic links removed.', 'modal.topicDelete.btn': 'Delete topic and notes',
+    'kb.search.ph': 'Search notes, goals, topics…', 'kb.search.btn': 'Search',
     'kb.category.all': 'All categories', 'kb.threshold': 'Threshold {n}',
     'calendar.backToday': 'Back to Today', 'calendar.legend.arranged': 'Scheduled', 'calendar.legend.today': 'Today',
     'calendar.weekdays': 'MTWTFSS',
     'topic.empty': 'No topics yet.<br>AI decides the topic and category while organizing notes,<br>then builds the library over time.',
     'topic.chip.precip': 'Precipitated', 'topic.chip.active': 'Active',
-    'topic.cascade.btn': 'Cascade delete all',
+    'topic.cascade.btn': 'Delete topic & notes',
     'topic.reindex': 'Rebuild Index',
     'topic.reindexDone': 'Index rebuilt! Scanned {goals} goals, {notes} notes, {errands} errands. Created {topicsCreated} topics, made {topicsLinked} links.',
     'topic.reindexFail': 'Reindex failed: ',
     'lastUpdated.prefix': 'Last updated: ',
     'collapsed.tip': 'Today {c}/{t} · {p}%  |  click to expand · drag to move',
-    'src.manual': 'Manual', 'src.ai': 'AI', 'task.record.manual': 'Manual entry', 'task.record.ai': 'AI generated',
-    'status.pending': 'Pending', 'status.clarifying': 'Clarifying', 'status.resolved': 'Resolved', 'status.archived': 'Archived',
+    'src.manual': 'Manual', 'src.ai': 'AI', 'src.recurring': 'Recurring', 'task.record.manual': 'Manual entry', 'task.record.ai': 'AI generated', 'task.record.recurring': 'Recurring preview',
+    'status.pending': 'Pending', 'status.clarifying': 'Clarifying', 'status.resolved': 'Resolved',
     'domain.health': 'Health', 'domain.relationship': 'Relations', 'domain.career': 'Career', 'domain.academic': 'Study', 'domain.social': 'Social', 'domain.misc': 'Other',
     'errand.must': 'Must', 'errand.should': 'Should', 'errand.nice': 'Nice',
     'empty.strategic': 'No strategic goals<br>Tap + on top-right to add, or tell AI in chat',
     'empty.constraints': 'No constraints<br>Tap + on top-right to add',
     'empty.current': 'No current goals',
     'goal.current': 'Current',
-    'empty.errands': 'No unscheduled actions',
-    'empty.notes': 'No notes yet<br><span style="font-size:11px">Ask AI to remember something, or capture raw text above for later organization</span>',
-    'note.all': 'All', 'note.input.ph': 'Capture the original information…', 'note.aiHint': 'This captures raw text only. AI writes the title, topic and category.',
-    'note.addBtn': '+ Add Note',
+    'empty.errands': 'No unscheduled actions', 'empty.completed': 'No completed actions yet',
+    'completed.aiFollowup': 'Saved to your dashboard. AI will read this completion in your next conversation; start one when you want a review, goal update, or next step.',
+    'empty.notes': 'No notes yet<br><span style="font-size:11px">Attach files directly in chat for AI to summarize and classify in this conversation</span>',
+    'note.all': 'All', 'note.input.ph': 'Capture the original information…', 'note.aiHint': 'Panel notes use a title, topic and content you have confirmed.',
+    'note.addBtn': '+ Add Note', 'note.chatImportHint': 'For AI summary and classification, attach the file directly in chat; AI will process it in this conversation.',
     'modal.note.title': 'Add Note',
     'note.field.title': 'Title', 'note.field.title.ph': 'e.g., Exam registration deadline',
     'note.field.content': 'Content',
@@ -233,7 +282,7 @@ const I18N = {
     'alert.eventRequired': 'Please fill date, time and title',
     'alert.goalRequired': 'Please enter a title',
     'alert.errandRequired': 'Please enter an action title',
-    'errand.done': 'Mark incomplete', 'errand.undo': 'Mark done',
+    'errand.done': 'Mark incomplete', 'errand.undo': 'Mark done', 'errand.undoComplete': 'Restore', 'errand.completed': 'Done', 'errand.doneToday': 'Completed today',
     'topic.noteEmpty': 'No notes', 'topic.relNone': 'No other relations',
     'kb.noHits': 'No matches found',
     'today': 'Today',
@@ -247,7 +296,7 @@ const I18N = {
     'topic.rel.decisions': 'Decisions', 'topic.rel.notes': 'Notes',
     'action.task': 'Planned task', 'action.unscheduled': 'No time assigned', 'action.endsAt': 'to {time}', 'action.editTime': 'Edit time', 'action.scheduleTime': 'Schedule time',
     'action.retention.transient': 'One-time', 'action.retention.review': 'Keep for review', 'action.retention.memory': 'AI memory candidate',
-    'briefing.empty': 'Run AI auto-schedule to generate today\'s briefing',
+    'briefing.empty': 'Waiting for the AI to read today\'s context and write the briefing',
     'topic.tab.empty': 'Nothing here',
     'topic.relGoals': 'Goals: ',
     'kb.type.topic': 'Topic', 'kb.type.note': 'Note', 'kb.type.goal': 'Goal', 'kb.type.event': 'Event',
@@ -259,9 +308,7 @@ const I18N = {
     'task.followup': '💡 Follow up: {title} ({n}d left)', 'task.followup.unknown': '💡 Follow up: {title}',
     'task.phase': '[{phase}] {title}',
     'task.exercise': 'Exercise', 'task.exercise.desc': 'Daily exercise (constraint)',
-    'task.errand.desc': 'Errand ({priority})',
     'task.locked': 'Set by you — you can still edit it; AI will not override it',
-    'priority.origin.ai': 'AI suggestion', 'priority.origin.manual': 'Your setting', 'priority.origin.pending': 'Awaiting AI review',
     'task.editTimePrompt': 'Enter new time (HH:MM format, e.g. 09:30):',
     'task.editDurationPrompt': 'Enter duration in minutes (e.g. 60):',
     'task.invalidTime': 'Invalid time format. Please use HH:MM (e.g. 09:30).',
@@ -350,11 +397,20 @@ async function init() {
     document.body.classList.add('electron');
   }
 
-  // Fixed expanded panel mode: no floating ball, always expanded (window size set by main process createWindow)
+  // Electron restores both the persisted presentation mode and the matching
+  // native window bounds.  Keep the DOM in the same mode; otherwise a saved
+  // 56×56 mini window would render a full dashboard inside itself on restart.
   if (isElectron) {
     await refreshState();
-    collapsed = false;
-    document.body.classList.add('expanded');
+    collapsed = state.meta?.collapsed === true;
+    const panel = document.getElementById('expanded-panel');
+    const mini = document.getElementById('mini-view');
+    const collapseButton = document.getElementById('collapse-toggle');
+    if (panel) panel.style.display = collapsed ? 'none' : '';
+    if (mini) mini.style.display = collapsed ? 'flex' : 'none';
+    document.body.classList.toggle('expanded', !collapsed);
+    document.body.classList.toggle('collapsed', collapsed);
+    if (collapseButton) collapseButton.classList.toggle('collapsed', collapsed);
     // Pin state: read from state.json (main process createWindow already set window accordingly)
     const pinBtn = document.getElementById('pin-toggle');
     if (pinBtn) {
@@ -367,12 +423,19 @@ async function init() {
       try { localStorage.setItem('zhigui_lang_v3', lang); } catch (e) {}
     }
   } else {
-    // Browser: read from localStorage
+    // Browser: read collapsed state from localStorage
     const savedCollapsed = localStorage.getItem('zhigui_collapsed');
-    if (savedCollapsed === 'false') {
+    if (savedCollapsed === 'true') {
+      collapsed = true;
+      const panel = document.getElementById('expanded-panel');
+      const mini = document.getElementById('mini-view');
+      if (panel) panel.style.display = 'none';
+      if (mini) mini.style.display = 'flex';
+      document.body.classList.add('collapsed');
+    } else {
       collapsed = false;
+      document.body.classList.add('expanded');
     }
-    document.body.classList.add('expanded');
     await refreshState();
   }
 
@@ -426,7 +489,10 @@ async function init() {
   
   // Browser mode timed refresh fallback (Electron uses IPC, not needed)
   if (!isElectron) {
-    setInterval(refreshState, 30000);
+    // A fetch alone updates the in-memory state but leaves the visible date
+    // stale. Reuse the debounced external-update path so the selected day is
+    // rendered after a missed SSE notification.
+    setInterval(() => scheduleExternalStateRender(), 30000);
   }
 }
 
@@ -488,6 +554,10 @@ async function fetchJson(url) {
     if (url === '/api/state') return await window.zhigui.getState();
     if (url === '/api/history') return await window.zhigui.getHistory();
     if (url === '/api/topics') return await window.zhigui.getTopics();
+    if (url.startsWith('/api/note?')) {
+      const noteId = new URLSearchParams(url.split('?')[1]).get('noteId');
+      return await window.zhigui.getNote(noteId);
+    }
     if (url.startsWith('/api/topic?')) {
       const topicId = new URLSearchParams(url.split('?')[1]).get('topicId');
       return await window.zhigui.getTopic(topicId);
@@ -521,8 +591,6 @@ async function postJson(url, body) {
       if (url === '/api/task/update') return await invokeDesktopMutation(() => window.zhigui.updateTask(body));
       if (url === '/api/task/delete') return await invokeDesktopMutation(() => window.zhigui.deleteTask(body));
       if (url === '/api/task/unlock') return await invokeDesktopMutation(() => window.zhigui.unlockTask(body));
-      if (url === '/api/priority/update') return await invokeDesktopMutation(() => window.zhigui.updatePriority(body.type, body.id, body.priority));
-      if (url === '/api/priority/unlock') return await invokeDesktopMutation(() => window.zhigui.unlockPriority(body.type, body.id));
       if (url === '/api/event/add') return await invokeDesktopMutation(() => window.zhigui.addEvent(body));
       if (url === '/api/goal/add') return await invokeDesktopMutation(() => window.zhigui.addGoal(body));
       if (url === '/api/goal/complete') return await invokeDesktopMutation(() => window.zhigui.completeGoal(body));
@@ -531,10 +599,13 @@ async function postJson(url, body) {
       if (url === '/api/errand/update') return await invokeDesktopMutation(() => window.zhigui.updateErrand(body));
       if (url === '/api/errand/delete') return await invokeDesktopMutation(() => window.zhigui.deleteErrand(body));
       if (url === '/api/errand/complete') return await invokeDesktopMutation(() => window.zhigui.completeErrand(body));
+      if (url === '/api/errand/undo') return await invokeDesktopMutation(() => window.zhigui.undoErrand(body));
       if (url === '/api/note/add') return await invokeDesktopMutation(() => window.zhigui.addNote(body));
       if (url === '/api/note/update') return await invokeDesktopMutation(() => window.zhigui.updateNote(body));
       if (url === '/api/note/delete') return await invokeDesktopMutation(() => window.zhigui.deleteNote(body));
-      if (url === '/api/review/resolve') return await invokeDesktopMutation(() => window.zhigui.resolveReview(body));
+      if (url === '/api/decision/update') return await invokeDesktopMutation(() => window.zhigui.updateDecision(body));
+       if (url === '/api/decision/delete') return await invokeDesktopMutation(() => window.zhigui.deleteDecision(body));
+      if (url === '/api/delete/preview') return await window.zhigui.previewDelete(body);
       if (url === '/api/weights/update') return await invokeDesktopMutation(() => window.zhigui.updateWeights(body));
       if (url === '/api/topic/delete') return await invokeDesktopMutation(() => window.zhigui.deleteTopic(body));
       if (url === '/api/reminder/delete') return await invokeDesktopMutation(() => window.zhigui.deleteReminder(body));
@@ -643,6 +714,17 @@ async function refreshState() {
     }
     if (incomingVersion > 0) lastSeenVersion = incomingVersion;
     state = data;
+    // Detail bodies are cached only while their corresponding summary is
+    // current.  This prevents a stale expanded note after an AI or panel edit.
+    const summaries = new Map((state.notes || []).map(note => [note.id, note]));
+    for (const [noteId, detail] of noteDetails) {
+      const summary = summaries.get(noteId);
+      if (!summary || (summary.updatedAt && detail.updatedAt && summary.updatedAt !== detail.updatedAt)) {
+        noteDetails.delete(noteId);
+        expandedNotes.delete(noteId);
+        if (editingNoteId === noteId) editingNoteId = null;
+      }
+    }
     if (state.meta && state.meta.theme) {
       theme = state.meta.theme;
       applyTheme();
@@ -706,15 +788,8 @@ function applyTheme() {
 }
 
 // ===== Collapse/Expand =====
-function toggleCollapse() {
-  collapsed = !collapsed;
-  document.body.classList.toggle('expanded', !collapsed);
-  localStorage.setItem('zhigui_collapsed', collapsed);
-  // Electron: sync window size
-  if (window.zhigui?.isElectron) {
-    window.zhigui.toggleCollapse(collapsed);
-  }
-}
+// toggleCollapseUI (below) is the active handler; the old toggleCollapse() was removed
+// as dead code — it only flipped the variable without updating the DOM panel/mini views.
 
 // ===== Pin Toggle =====
 async function togglePin() {
@@ -743,22 +818,26 @@ function toggleCollapseUI() {
 
   if (panel.style.display === 'none') {
     // Expand: show full panel, hide mini icon
+    collapsed = false;
     panel.style.display = '';
     if (mini) mini.style.display = 'none';
     document.body.classList.add('expanded');
     document.body.classList.remove('collapsed');
     if (btn) btn.classList.remove('collapsed');
+    localStorage.setItem('zhigui_collapsed', 'false');
     if (window.zhigui?.isElectron) {
       window.zhigui.toggleCollapse(false);
     }
     refreshState();
   } else {
     // Collapse: hide panel, show mini icon
+    collapsed = true;
     panel.style.display = 'none';
     if (mini) mini.style.display = 'flex';
     document.body.classList.remove('expanded');
     document.body.classList.add('collapsed');
     if (btn) btn.classList.add('collapsed');
+    localStorage.setItem('zhigui_collapsed', 'true');
     if (window.zhigui?.isElectron) {
       window.zhigui.toggleCollapse(true);
     }
@@ -773,8 +852,35 @@ function formatDate(date) {
   return `${y}-${m}-${d}`;
 }
 
+function parseLocalDate(dateStr) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr || '');
+  if (!match) return null;
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+function getViewedDate() {
+  if (selectedDate) return parseLocalDate(selectedDate) || new Date();
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+function setViewedDate(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return;
+  selectedDate = formatDate(date);
+}
+
+function renderViewedDate() {
+  renderFocusHero();
+  renderBriefing();
+  renderSchedule();
+  renderErrands();
+  renderCompletedActions();
+  renderReflection();
+}
+
 function formatDateDisplay(dateStr) {
-  const d = new Date(dateStr);
+  const d = parseLocalDate(dateStr);
+  if (!d) return '';
   const m = d.getMonth() + 1;
   const day = d.getDate();
   const monthShort = t('calendar.months').split(',')[d.getMonth()];
@@ -794,7 +900,8 @@ function formatDateTime(iso) {
 }
 
 function getWeekdayName(dateStr) {
-  const d = new Date(dateStr);
+  const d = parseLocalDate(dateStr);
+  if (!d) return '';
   const names = lang === 'en'
     ? ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
     : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -805,21 +912,14 @@ function isToday(dateStr) {
   return dateStr === formatDate(new Date());
 }
 
-function getOffsetDate(offset) {
-  const d = new Date();
-  d.setDate(d.getDate() + offset);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
 // ===== Render Entry =====
 // Supports incremental rendering: if changedKeys is provided, only re-render
 // the affected sections. Falls back to full render for backward compatibility.
 const SECTION_MAP = {
-  schedule: ['renderCollapsed', 'renderFocusHero', 'renderSchedule'],
-  goals: ['renderGoals', 'renderConstraints'],
-  notes: ['renderRelatedNotes', 'renderNotes'],
-  errands: ['renderErrands'],
+  schedule: ['renderCollapsed', 'renderFocusHero', 'renderSchedule', 'renderCompletedActions'],
+  goals: ['renderGoals', 'renderConstraints', 'renderDecisions'],
+  notes: ['renderNotes'],
+  errands: ['renderErrands', 'renderCompletedActions'],
   briefing: ['renderBriefing'],
   conflicts: ['renderConflicts'],
   state: null,  // null = full render
@@ -865,14 +965,16 @@ function _fullRender() {
   renderCollapsed();
   renderFocusHero();
   renderBriefing();
-  renderRelatedNotes();
   renderSchedule();
   renderGoals();
   renderConstraints();
+  renderDecisions();
   renderErrands();
-  renderPendingReviewBadge();
+  renderCompletedActions();
+  renderReflection();
   renderNotes();
   renderConflicts();
+  renderAttentionSignals();
   renderLastUpdated();
   // Refresh Topic Library — deletions in any view must sync to the library.
   // renderTopics() checks container visibility internally to avoid wasted DOM work.
@@ -880,16 +982,22 @@ function _fullRender() {
 }
 
 function renderFocusHero() {
-  const date = formatDate(getOffsetDate(currentDayOffset));
+  const date = formatDate(getViewedDate());
+  const viewingToday = isToday(date);
   const tasks = state.schedule?.days?.[date]?.tasks || [];
   const openTasks = tasks.filter(task => !task.completed);
-  const completed = tasks.length - openTasks.length;
-  const activeGoals = (state.currentGoals || []).filter(goal => !goal.completed);
-  const dayErrands = (state.errands || []).filter(errand => errand.date === date && !errand.completed);
-  const priorityTask = openTasks.slice().sort((a, b) => (b.priority || 0) - (a.priority || 0))[0];
-  const priorityGoal = activeGoals.slice().sort((a, b) => (b.priority || 0) - (a.priority || 0))[0];
-  const mainFocus = priorityTask?.title || priorityGoal?.title || (lang === 'zh' ? '给今天留出一点有意识的空间' : 'Leave some intentional space for today');
-  const progress = tasks.length ? Math.round(completed / tasks.length * 100) : 0;
+  const openActions = (state.errands || []).filter(action => action.date === date && !action.completed);
+  const completedTasks = tasks.filter(task => task.completed).length;
+  const completedActions = getTodayCompletedActions(date).filter(action => !action.taskId).length;
+  const pendingItems = [...openTasks.map(item => ({ item })), ...openActions.map(item => ({ item }))]
+    .sort((a, b) => (a.item.time || '99:99').localeCompare(b.item.time || '99:99'));
+  const pendingCount = pendingItems.length;
+  const completedCount = completedTasks + completedActions;
+  const totalCount = pendingCount + completedCount;
+  const mainFocus = pendingItems[0]?.item.title || (completedCount > 0
+    ? (lang === 'zh' ? (viewingToday ? '今日已完成' : '当日已完成') : 'All done for this day')
+    : (lang === 'zh' ? '暂无安排' : 'No plans for this day'));
+  const progress = totalCount ? Math.round(completedCount / totalCount * 100) : 0;
 
   const title = document.getElementById('focus-title');
   const summary = document.getElementById('focus-summary');
@@ -898,23 +1006,23 @@ function renderFocusHero() {
   if (dateEl) dateEl.textContent = formatDateDisplay(date);
   if (summary) {
     summary.textContent = lang === 'zh'
-      ? `${openTasks.length} 项待处理 · ${dayErrands.length} 项生活事项。建议先推进最重要的一步，再根据精力调整。`
-      : `${openTasks.length} open task${openTasks.length === 1 ? '' : 's'} · ${dayErrands.length} life action${dayErrands.length === 1 ? '' : 's'}. Start with the highest-leverage move and adapt with your energy.`;
+      ? (totalCount ? `${pendingCount} 项待处理 · ${completedCount} 项已完成。` : '这一天还没有安排。')
+      : (totalCount ? `${pendingCount} pending · ${completedCount} completed.` : 'Nothing is scheduled for this day.');
   }
   const taskCount = document.getElementById('focus-task-count');
   const goalCount = document.getElementById('focus-goal-count');
   const progressEl = document.getElementById('focus-progress');
-  if (taskCount) taskCount.textContent = openTasks.length;
-  if (goalCount) goalCount.textContent = activeGoals.length;
+  if (taskCount) taskCount.textContent = pendingCount;
+  if (goalCount) goalCount.textContent = completedCount;
   if (progressEl) progressEl.textContent = `${progress}%`;
 
   const labels = lang === 'zh'
     ? {
-        eyebrow: '今日方向', tasks: '待处理', goals: '进行中目标', progress: '今日进度',
+        eyebrow: viewingToday ? '今日概览' : '当日概览', tasks: '待处理', goals: '已完成', progress: viewingToday ? '今日进度' : '当日进度',
         addEvent: '＋ 加入日程', addErrand: '添加事项'
       }
     : {
-        eyebrow: "TODAY'S DIRECTION", tasks: 'open tasks', goals: 'active goals', progress: 'day progress',
+        eyebrow: viewingToday ? "TODAY AT A GLANCE" : "DAY AT A GLANCE", tasks: 'pending', goals: 'completed', progress: 'day progress',
         addEvent: '＋ Add to schedule', addErrand: 'Add an action'
       };
   const textById = {
@@ -929,6 +1037,15 @@ function renderFocusHero() {
     const element = document.getElementById(id);
     if (element) element.textContent = value;
   });
+
+  const scheduleTitle = document.querySelector('#section-schedule .section-title');
+  const completedTitle = document.querySelector('#section-completed .section-title');
+  if (scheduleTitle) scheduleTitle.textContent = viewingToday
+    ? t('section.schedule')
+    : `${formatDateDisplay(date)} ${lang === 'zh' ? '行动安排' : 'Action Schedule'}`;
+  if (completedTitle) completedTitle.textContent = viewingToday
+    ? t('section.completed')
+    : `${formatDateDisplay(date)} ${lang === 'zh' ? '已完成' : 'Completed'}`;
 }
 
 // ===== Collapsed State Rendering =====
@@ -946,24 +1063,27 @@ function renderCollapsed() {}
 // 6. Strategic reminder
 // 7. Daily quote
 //
-// "Pending confirmations" and "conflicts" are moved to renderPendingItems().
-
-// Clear today's stored briefing so the dashboard re-derives it from live state.
-// Used after a goal is completed/reopened/deleted, so "今日方向" reflects the change.
-function invalidateTodayBriefing() {
-  const today = formatDate(new Date());
-  if (state.briefings && state.briefings[today]) delete state.briefings[today];
-  if (state.morningBriefing && state.morningBriefing.date === today) state.morningBriefing = null;
-}
-
+// Render the AI-authored date-specific briefing. It is not derived from live task state.
 function renderBriefing() {
-  const displayDate = formatDate(getOffsetDate(currentDayOffset));
+  const displayDate = formatDate(getViewedDate());
   const section = document.getElementById('section-briefing');
   if (!section) return;
 
   // Always show the briefing section (P0-9.3: never hide)
   section.style.display = '';
   document.getElementById('briefing-date').textContent = formatDateDisplay(displayDate);
+
+  // Briefing is today-only. When viewing another date, clear the blocks.
+  if (!isToday(displayDate)) {
+    _setBlockContent('must', '');
+    _setBlockContent('rec', '');
+    _setBlockContent('not', '');
+    _setBlockContent('strategic', '');
+    _setBlockContent('dailyQuote', '');
+    const emptyState = document.getElementById('briefing-empty-state');
+    if (emptyState) emptyState.style.display = '';
+    return;
+  }
 
   const storedBriefing = (state.briefings && state.briefings[displayDate]) || state.morningBriefing;
 
@@ -976,16 +1096,20 @@ function renderBriefing() {
   _setBlockContent('not', content.not);
   _setBlockContent('strategic', content.strategic);
   _setBlockContent('dailyQuote', content.dailyQuote);
+
+  // A briefing is an AI-authored, date-specific record. It is never inferred
+  // from current tasks, goals, or completion state in the dashboard.
+  const emptyState = document.getElementById('briefing-empty-state');
+  if (emptyState) {
+    emptyState.style.display = Object.values(content).some(Boolean) ? 'none' : '';
+  }
 }
 
 // Extract briefing data from any format into the fixed 5-slot structure
 function _extractBriefingContent(storedBriefing, displayDate) {
   const empty = { must: '', rec: '', not: '', strategic: '', dailyQuote: '' };
 
-  if (!storedBriefing || storedBriefing.date !== displayDate) {
-    // Try local fallback
-    return _extractLocalContent(displayDate) || empty;
-  }
+  if (!storedBriefing || storedBriefing.date !== displayDate) return empty;
 
   // Free-form sections: AI chose a custom structure — map by label
   if (storedBriefing.sections && storedBriefing.sections.length > 0) {
@@ -1008,8 +1132,7 @@ function _extractBriefingContent(storedBriefing, displayDate) {
     };
   }
 
-  // Fallback: derive locally
-  return _extractLocalContent(displayDate) || empty;
+  return empty;
 }
 
 // Join array of text items into a single string
@@ -1077,11 +1200,6 @@ function _extractFromNewBriefing(b) {
     }).join('；');
   }
 
-  // Note signals -> not
-  if (b.noteSignals && b.noteSignals.reason) {
-    result.not = b.noteSignals.reason;
-  }
-
   // Goal progress -> strategic
   if (b.goalProgress && b.goalProgress.length > 0) {
     result.strategic = b.goalProgress.map(g => {
@@ -1106,46 +1224,6 @@ function _extractFromNewBriefing(b) {
 }
 
 // Extract content locally when no backend briefing exists
-function _extractLocalContent(displayDate) {
-  const dayData = state.schedule?.days?.[displayDate];
-  const tasks = dayData?.tasks || [];
-  const dayErrands = (state.errands || []).filter(e => e.date === displayDate);
-  const activeGoals = (state.currentGoals || []).filter(g => !g.completed);
-  const strategicGoals = (state.strategicGoals || []).filter(g => !g.completed);
-
-  if (tasks.length === 0 && activeGoals.length === 0 && dayErrands.length === 0) {
-    return null;
-  }
-
-  const result = { must: '', rec: '', not: '', strategic: '', dailyQuote: '' };
-
-  // must: must errands + overdue goals
-  const mustErrands = dayErrands.filter(e => e.priority === 'must');
-  const overdueGoals = activeGoals.filter(g => g.overdue);
-  const mustItems = [];
-  mustItems.push(...mustErrands.map(e => '📌 ' + e.title));
-  mustItems.push(...overdueGoals.map(g => '⚠️ ' + g.title));
-  result.must = mustItems.join('；');
-
-  // rec: top priority task or goal
-  const topTask = tasks.filter(t => !t.completed).sort((a, b) => b.priority - a.priority)[0];
-  const topGoal = activeGoals.slice().sort((a, b) =>
-    (b.priority + (b._costPerf || 0)) - (a.priority + (a._costPerf || 0))
-  )[0];
-  if (topTask) {
-    result.rec = topTask.title;
-  } else if (topGoal) {
-    result.rec = topGoal.title;
-  }
-
-  // strategic: strategic goals
-  if (strategicGoals.length > 0) {
-    result.strategic = strategicGoals.map(g => g.title).join('；');
-  }
-
-  return result;
-}
-
 // Set content for a fixed briefing block by key
 function _setBlockContent(key, text) {
   const el = document.getElementById('briefing-' + key + '-content');
@@ -1160,179 +1238,14 @@ function _setBlockContent(key, text) {
   }
 }
 
-// Render fixed-format briefing sections as clean labeled blocks (AI fills content only)
-// NOTE: This function is now only used by renderPendingItems; kept for backward compat.
-function renderBriefingSections(sections, quote) {
-  // Fixed 5-section format: label -> dot color mapping
-  const zhMap = { '必须完成': 'red', '今日推荐': 'green', '不建议': 'white', '战略提醒': 'gold', '每日一言': 'gold' };
-  const blocks = sections.map(s => {
-    const dotClass = zhMap[s.label] || 'white';
-    return `<div class="briefing-block briefing-block-${dotClass}">
-      <div class="briefing-block-head"><span class="briefing-block-label">${escapeHtml(s.label)}</span></div>
-      <div class="briefing-row"><span class="briefing-dot ${dotClass}"></span><span class="briefing-row-text">${escapeHtml(s.content)}</span></div>
-    </div>`;
-  });
-  if (quote) {
-    blocks.push(`<div class="briefing-quote">${escapeHtml(quote)}</div>`);
-  }
-  return blocks.join('') || `<div class="briefing-empty">${t('briefing.empty') || (lang === 'zh' ? '暂无晨报数据' : 'No briefing data')}</div>`;
-}
-
-// Render the new briefing data model (kept for reference / non-main-card usage)
-// NOTE: This function is now unused for the main briefing card; kept for backward compat.
-function _renderNewBriefing(b) {
-  const parts = [];
-
-  // 1. Top recommendation (decision card)
-  if (b.topRecommendation) {
-    const rec = b.topRecommendation;
-    const scoreBadge = rec.costPerf != null
-      ? `<span class="briefing-rec-score">${escapeHtml(String(rec.costPerf))}<span class="briefing-rec-score-unit">${lang === 'zh' ? '分' : 'pts'}</span></span>`
-      : '';
-    const meta = [
-      rec.estimatedTime ? `<span class="briefing-time">${escapeHtml(rec.estimatedTime)}</span>` : '',
-      rec.priority != null ? `<span class="briefing-rec-priority">${lang === 'zh' ? '优先级' : 'Priority'} ${rec.priority}</span>` : '',
-    ].filter(Boolean).join('<span class="briefing-rec-meta-sep">·</span>');
-    parts.push(`
-      <div class="briefing-top-rec">
-        <div class="briefing-rec-head">
-          <div class="briefing-rec-title-wrap">
-            <div class="briefing-rec-title">${escapeHtml(rec.title || '')}</div>
-            ${rec.reason ? `<div class="briefing-rec-reason">${escapeHtml(rec.reason)}</div>` : ''}
-          </div>
-          ${scoreBadge}
-        </div>
-        ${meta ? `<div class="briefing-rec-meta">${meta}</div>` : ''}
-      </div>`);
-  }
-
-  // 2. Time budget bar
-  if (b.timeBudget) {
-    const tb = b.timeBudget;
-    const totalH = tb.availableHours || 0;
-    const schedPct = totalH > 0 ? Math.round((tb.scheduledHours / totalH) * 100) : 0;
-    const errandPct = totalH > 0 ? Math.round((tb.errandHours / totalH) * 100) : 0;
-    const remainPct = Math.max(0, 100 - schedPct - errandPct);
-    parts.push(`
-      <div class="briefing-time-budget">
-        <div class="briefing-budget-bar">
-          <div class="budget-scheduled" style="width:${schedPct}%"></div>
-          <div class="budget-errand" style="width:${errandPct}%"></div>
-          <div class="budget-remaining" style="width:${remainPct}%"></div>
-        </div>
-        <div class="briefing-budget-labels">
-          <span>${lang === 'zh' ? '已排' : 'Scheduled'} ${tb.scheduledHours || 0}h</span>
-          <span>${lang === 'zh' ? '琐事' : 'Errand'} ${tb.errandHours || 0}h</span>
-          <span>${lang === 'zh' ? '剩余' : 'Free'} ${tb.remainingHours || 0}h</span>
-        </div>
-      </div>`);
-  }
-
-  // 3. Hard constraints
-  if (b.hardConstraints && b.hardConstraints.length > 0) {
-    const items = b.hardConstraints.map(c => {
-      const icon = c.type === 'must_errand' ? '📌' : c.type === 'rest_day' ? '😴' : c.type === 'deadline_today' ? '⚠️' : '•';
-      const text = c.title || c.message || '';
-      const timeStr = c.time ? ` ${c.time}` : '';
-      return `<div class="briefing-constraint">${icon} ${escapeHtml(text)}${timeStr ? `<span class="briefing-time-tag">${escapeHtml(timeStr)}</span>` : ''}</div>`;
-    }).join('');
-    parts.push(`<div class="briefing-constraints">${items}</div>`);
-  }
-
-  // 4. Note signals
-  if (b.noteSignals && b.noteSignals.reason) {
-    const ns = b.noteSignals;
-    const intensityPct = Math.round((ns.intensityModifier || 1) * 100);
-    parts.push(`
-      <div class="briefing-signals">
-        <div class="briefing-signal-text">${escapeHtml(ns.reason)}</div>
-        ${intensityPct < 100 ? `<div class="briefing-intensity">${lang === 'zh' ? '建议强度' : 'Suggested intensity'}: ${intensityPct}%</div>` : ''}
-      </div>`);
-  }
-
-  // 5. Goal progress
-  if (b.goalProgress && b.goalProgress.length > 0) {
-    const items = b.goalProgress.map(g => {
-      const ddl = g.daysLeft != null ? ` · ${g.daysLeft}${lang === 'zh' ? '天' : 'd'}` : '';
-      const phase = g.phase ? ` [${escapeHtml(g.phase)}]` : '';
-      const progress = g.weekProgress ? ` ${escapeHtml(g.weekProgress)}` : '';
-      return `<div class="briefing-goal-progress">🎯 ${escapeHtml(g.title || '')}${phase}${progress}${ddl}</div>`;
-    }).join('');
-    parts.push(`<div class="briefing-goal-progress-list">${items}</div>`);
-  }
-
-  // 6. Strategic reminder (optional, weekly)
-  if (b.strategicReminder && b.strategicReminder.title) {
-    parts.push(`
-      <div class="briefing-strategic">
-        <span class="briefing-strategic-title">${escapeHtml(b.strategicReminder.title)}</span>
-        ${b.strategicReminder.weeklyNote ? `<span class="briefing-strategic-note">${escapeHtml(b.strategicReminder.weeklyNote)}</span>` : ''}
-      </div>`);
-  }
-
-  // 7. Daily quote
-  if (b.dailyQuote) {
-    parts.push(`<div class="briefing-quote">${escapeHtml(b.dailyQuote)}</div>`);
-  }
-
-  return parts.length > 0 ? parts.join('') : `<div class="briefing-empty">${t('briefing.empty') || (lang === 'zh' ? '暂无晨报数据' : 'No briefing data')}</div>`;
-}
-
-// Fallback: derive briefing locally when no backend briefing exists
-// NOTE: This function is now unused for the main briefing card; kept for backward compat.
-function _renderLocalBriefing(displayDate) {
-  const content = _extractLocalContent(displayDate);
-  if (!content) return `<div class="briefing-empty">${t('briefing.empty') || (lang === 'zh' ? '今天暂无安排' : 'Nothing scheduled today')}</div>`;
-  return buildBriefingRows(content, '');
-}
-
-// Check if briefing has the new data model fields
+// Check if briefing has the new data model fields (used by main briefing card rendering)
 function _hasNewBriefingContent(b) {
   if (!b) return false;
   // If briefing is still raw data (AI hasn't composed yet), fall back to old format
   if (b._raw) return false;
   return !!(b.topRecommendation || b.timeBudget || (b.hardConstraints && b.hardConstraints.length > 0) ||
-    b.noteSignals || (b.goalProgress && b.goalProgress.length > 0) ||
+    (b.goalProgress && b.goalProgress.length > 0) ||
     (b.sections && b.sections.length > 0));
-}
-
-// Render pending items (confirmations + conflicts) as an independent section
-// Moved from the old renderLiveBriefing (P0-9.3)
-function renderPendingItems() {
-  const section = document.getElementById('section-pending-items');
-  const card = document.getElementById('pending-items-card');
-  if (!section || !card) return;
-
-  const confirmations = (typeof getPendingReviews === 'function' ? getPendingReviews() : [])
-    .slice(0, 3)
-    .map(review => review.type === 'note_organization'
-      ? (review.proposal?.title || review.title || t('review.organization'))
-      : (review.title || review.question || t('review.question')))
-    .filter(Boolean);
-  const urgentGoals = (state.currentGoals || [])
-    .filter(goal => !goal.completed && (goal.overdue || (goal.daysLeft != null && goal.daysLeft <= 3)))
-    .sort((a, b) => (b.overdue === true) - (a.overdue === true) || (a.daysLeft || 999) - (b.daysLeft || 999))
-    .slice(0, 3)
-    .map(goal => goal.overdue ? `${goal.title} · ${t('briefing.overdue')}` : `${goal.title} · ${t('goal.ddl.left', { n: goal.daysLeft })}`);
-  const conflicts = (state.conflicts || [])
-    .filter(conflict => conflict && (conflict.status !== 'resolved'))
-    .slice(0, 2)
-    .map(conflict => conflict.message || conflict.title || conflict.description)
-    .filter(Boolean);
-
-  if (!confirmations.length && !urgentGoals.length && !conflicts.length) {
-    section.style.display = 'none';
-    card.innerHTML = '';
-    return;
-  }
-
-  section.style.display = '';
-  card.innerHTML = buildBriefingRows({
-    must: confirmations,
-    rec: urgentGoals,
-    not: conflicts,
-    strategic: [],
-  }, '');
 }
 
 /** Convert value to array (null/undefined/string → array; already an array returns as-is) */
@@ -1394,10 +1307,10 @@ function buildBriefingRows(groups, quote) {
 
 // ===== Schedule Rendering =====
 function renderSchedule() {
-  const displayDate = formatDate(getOffsetDate(currentDayOffset));
+  const displayDate = formatDate(getViewedDate());
   
   // Date label: show full date + weekday
-  const dateObj = new Date(displayDate);
+  const dateObj = parseLocalDate(displayDate);
   const month = dateObj.getMonth() + 1;
   const day = dateObj.getDate();
   const monthShort = t('calendar.months').split(',')[dateObj.getMonth()];
@@ -1407,15 +1320,21 @@ function renderSchedule() {
   const container = document.getElementById('schedule-container');
   const dayData = state.schedule?.days?.[displayDate];
   const scheduledTasks = (dayData?.tasks || [])
-    .filter(task => task.time)
+    .filter(task => task.time && !task.completed)
     .map(task => ({ kind: 'task', item: task }));
+  const dateFixedTasks = (dayData?.tasks || [])
+    .filter(task => !task.time && !task.completed)
+    .map(task => ({ kind: 'date-fixed-task', item: task }));
   const scheduledActions = (state.errands || [])
-    .filter(action => action.date === displayDate && action.time)
+    .filter(action => action.date === displayDate && action.time && !action.completed)
     .map(action => ({ kind: 'action', item: action }));
+  const dateFixedActions = (state.errands || [])
+    .filter(action => action.date === displayDate && !action.time && !action.completed)
+    .map(action => ({ kind: 'date-fixed-action', item: action }));
   const actions = [...scheduledTasks, ...scheduledActions]
     .sort((a, b) => (a.item.time || '99:99').localeCompare(b.item.time || '99:99'));
 
-  if (actions.length === 0) {
+  if (actions.length === 0 && dateFixedTasks.length === 0 && dateFixedActions.length === 0) {
     const todayMark = isToday(displayDate) ? ' · ' + t('today') : '';
     container.innerHTML = `<div class="empty-state">${formatDateDisplay(displayDate)} ${getWeekdayName(displayDate)}${todayMark}<br>${t('schedule.empty')}</div>`;
     return;
@@ -1424,6 +1343,11 @@ function renderSchedule() {
   container.innerHTML = '';
   actions.forEach(action => {
     container.innerHTML += action.kind === 'task'
+      ? renderTaskCard(action.item, displayDate)
+      : renderScheduledActionCard(action.item);
+  });
+  [...dateFixedTasks, ...dateFixedActions].forEach(action => {
+    container.innerHTML += action.kind === 'date-fixed-task'
       ? renderTaskCard(action.item, displayDate)
       : renderScheduledActionCard(action.item);
   });
@@ -1450,41 +1374,38 @@ function renderActionTime(time, duration, editHandler = '') {
   </div>`;
 }
 
-function getPriorityOrigin(item) {
-  if (item.priorityOverride?.source === 'user' || item.prioritySource === 'user' || item.locked === true) {
-    return { key: 'manual', label: t('priority.origin.manual') };
-  }
-  if (item.prioritySource === 'ai' || item.source === 'ai' || item.aiReasoning) {
-    return { key: 'ai', label: t('priority.origin.ai') };
-  }
-  return { key: 'pending', label: t('priority.origin.pending') };
-}
-
 function getRetentionInfo(item) {
   const key = ['review', 'memory'].includes(item?.retention) ? item.retention : 'transient';
   return { key, label: t(`action.retention.${key}`) };
 }
 
 function renderTaskCard(task, date) {
-  const priorityLevel = task.priority >= 75 ? 'high' : task.priority >= 50 ? 'mid' : 'low';
-  const sourceLabel = task.source === 'manual' ? t('task.record.manual') : t('task.record.ai');
-  const sourceClass = task.source === 'manual' ? 'manual' : '';
-  const priorityOrigin = getPriorityOrigin(task);
+  const contextKey = `task:${date}:${task.id}`;
+  const linkedNotes = getLinkedNotesForTask(task);
+  const sourceLabel = task.source === 'manual' ? t('task.record.manual')
+    : task.source === 'recurring' ? t('task.record.recurring')
+    : t('task.record.ai');
+  const sourceClass = task.source === 'manual' ? 'manual' : task.source === 'recurring' ? 'recurring' : '';
   const resourceHtml = task.resource ? `<div class="task-resource">📖 ${task.resource}</div>` : '';
   const timingHint = task.manualLocked ? `<span class="locked-badge" title="${t('task.locked')}">✎</span>` : '';
+  // P2-3: Show recurring badge for pre-scheduled recurring task instances
+  const recurringBadge = task.source === 'recurring'
+    ? '<span class="errand-pattern-tag recurring">🔄</span>'
+    : '';
 
   return `
-    <div class="task-card${task.completed ? ' completed' : ''}" onclick="toggleTask('${escapeAttr(date)}', '${escapeAttr(task.id)}')">
+    <div class="task-card${task.completed ? ' completed' : ''}">
       ${renderActionTime(task.time, task.duration, `editTaskTime('${escapeAttr(date)}', '${escapeAttr(task.id)}', '${escapeAttr(task.time)}', ${Number(task.duration) || 60})`)}
       <div class="task-body">
-        <div class="task-title">${escapeHtml(translateTaskTitle(task.title))}</div>
+        <div class="task-title">${escapeHtml(translateTaskTitle(task.title))}${recurringBadge}</div>
         ${task.description ? `<div class="task-desc">${escapeHtml(task.description)}</div>` : ''}
         ${resourceHtml}
+        ${linkedNotes}
+        ${renderActionContextSummary(task, contextKey)}
+        ${renderActionContext(task, contextKey)}
         <div class="task-footer">
-          <div class="task-priority">
+          <div class="task-meta">
             <span class="task-source ${sourceClass}">${sourceLabel}</span>${timingHint}
-            <span class="task-priority-origin ${priorityOrigin.key}">${priorityOrigin.label}</span>
-            <button type="button" class="task-priority-score ${priorityOrigin.key}" onclick="event.stopPropagation();openPriorityModal('task','${escapeAttr(task.id)}','${escapeAttr(task.title)}',${task.priority})">${task.priority}${t('unit.pts')}</button>
           </div>
           <div class="task-card-actions">
             <button type="button" class="task-delete-btn" onclick="event.stopPropagation();requestTaskDelete('${escapeAttr(date)}','${escapeAttr(task.id)}','${escapeAttr(task.title)}')" title="${t('modal.actionDelete.title')}" aria-label="${t('modal.actionDelete.title')}">
@@ -1499,19 +1420,27 @@ function renderTaskCard(task, date) {
 }
 
 function renderScheduledActionCard(action) {
-  const priorityLabel = { must: t('errand.must'), should: t('errand.should'), nice: t('errand.nice') };
-  const priorityOrigin = getPriorityOrigin(action);
+  const commitmentLabel = { must: t('errand.must'), should: t('errand.should'), nice: t('errand.nice') };
   const retention = getRetentionInfo(action);
+  const patternTag = action.pattern === 'recurring'
+    ? '<span class="errand-pattern-tag recurring">🔄</span>'
+    : '';
+  const linkedNotes = getLinkedNotesHtml(action.noteIds);
+  const contextKey = `errand:${action.id}`;
   return `
-    <div class="task-card scheduled-action${action.completed ? ' completed' : ''}" onclick="toggleErrand('${escapeAttr(action.id)}')">
-      ${renderActionTime(action.time, action.duration, `editActionTime('${escapeAttr(action.id)}', '${escapeAttr(action.time)}', ${Number(action.duration) || 60})`)}
+    <div class="task-card scheduled-action${action.completed ? ' completed' : ''}">
+      ${action.time
+        ? renderActionTime(action.time, action.duration, `editActionTime('${escapeAttr(action.id)}', '${escapeAttr(action.time)}', ${Number(action.duration) || 60})`)
+        : `<div class="task-time time-pending"><span>${t('action.timePending')}</span><button type="button" class="action-time-button" onclick="event.stopPropagation();editActionTime('${escapeAttr(action.id)}', '', ${Number(action.duration) || 60})">${t('action.scheduleTime')}</button></div>`}
       <div class="task-body">
-        <div class="task-title">${escapeHtml(action.title)}</div>
+        <div class="task-title">${escapeHtml(action.title)}${patternTag}</div>
         ${action.note ? `<div class="task-desc">${escapeHtml(action.note)}</div>` : ''}
+        ${linkedNotes}
+        ${renderActionContextSummary(action, contextKey)}
+        ${renderActionContext(action, contextKey)}
         <div class="task-footer">
-          <div class="task-priority">
-            <span class="task-source manual">${priorityLabel[action.priority] || t('errand.should')}</span>
-            <span class="task-priority-origin ${priorityOrigin.key}">${priorityOrigin.label}</span>
+          <div class="task-meta">
+            <span class="task-source manual">${commitmentLabel[action.commitmentLevel] || t('errand.should')}</span>
             <span class="task-retention ${retention.key}" title="${retention.label}">${retention.label}</span>
           </div>
           <div class="task-card-actions">
@@ -1572,7 +1501,9 @@ function renderGoals() {
     return;
   }
 
-  container.innerHTML = items.map(x => renderGoalCard(x.item, x.type)).join('');
+  const shown = items.slice(0, visibleCounts.goals);
+  container.innerHTML = shown.map(x => renderGoalCard(x.item, x.type)).join('')
+    + renderMoreButton('goals', shown.length, items.length);
 }
 
 function renderConstraints() {
@@ -1587,17 +1518,174 @@ function renderConstraints() {
   container.innerHTML = constraints.map(c => renderGoalCard(c, 'constraint')).join('');
 }
 
+// ===== Decisions Rendering =====
+function renderDecisions() {
+  const container = document.getElementById('decisions-container');
+  if (!container) return;
+  const decisions = (state.decisions || []).slice().sort((a, b) => {
+    const aArchived = a.lifecycleState === 'archived' ? 1 : 0;
+    const bArchived = b.lifecycleState === 'archived' ? 1 : 0;
+    return aArchived - bArchived || (b.updatedAt || b.createdAt || '').localeCompare(a.updatedAt || a.createdAt || '');
+  });
+
+  if (decisions.length === 0) {
+    container.innerHTML = '<div class="empty-state">' + (t('empty.decisions') || '暂无决策记录') + '</div>';
+    return;
+  }
+
+  const shown = decisions.slice(0, visibleCounts.decisions);
+  container.innerHTML = shown.map(d => {
+    const statusClass = d.status || 'pending';
+    const statusLabel = t('decision.' + statusClass) || d.status;
+    const relatedGoals = (d.relatedGoalIds || [])
+      .map(id => {
+        const g = [...(state.currentGoals || []), ...(state.strategicGoals || [])].find(x => x.id === id);
+        return g ? escapeHtml(g.title) : null;
+      })
+      .filter(Boolean);
+    const relatedHtml = relatedGoals.length
+      ? '<div class="decision-related">' + (lang === 'zh' ? '关联目标：' : 'Related goals: ') + relatedGoals.join(' · ') + '</div>'
+      : '';
+    const evidenceHtml = d.evidence
+      ? '<div class="decision-evidence">' + escapeHtml(d.evidence.length > 80 ? d.evidence.slice(0, 80) + '…' : d.evidence) + '</div>'
+      : '';
+    const dateStr = d.createdAt ? formatDateTime(d.createdAt) : '';
+    return `
+      <div class="decision-card">
+        <span class="decision-status-tag ${statusClass}">${statusLabel}</span>
+        <div class="decision-info">
+          <div class="decision-title">${escapeHtml(d.title)}</div>
+          ${evidenceHtml}
+          ${relatedHtml}
+          <div class="decision-meta">${dateStr}</div>
+        </div>
+        ${d.lifecycleState !== 'archived' ? `<button type="button" class="decision-resolve-btn" onclick="event.stopPropagation();resolveDecision('${escapeAttr(d.id)}','${escapeAttr(d.title)}')">${lang === 'zh' ? '结束跟踪' : 'End tracking'}</button>` : ''}
+        <div class="decision-delete-btn" onclick="event.stopPropagation();deleteDecision('${escapeAttr(d.id)}','${escapeAttr(d.title)}')" title="${lang === 'zh' ? '仅误录时删除' : 'Delete only if recorded in error'}">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+          </svg>
+        </div>
+      </div>
+    `;
+  }).join('') + renderMoreButton('decisions', shown.length, decisions.length);
+}
+
+async function resolveDecision(id, title) {
+  if (!confirm(lang === 'zh'
+    ? `结束对“${title}”的跟踪？它会保留为历史记录，但不再参与当前安排。`
+    : `End tracking for “${title}”? It will be kept as history and will no longer guide current planning.`)) return;
+  const result = await runAction('/api/decision/update', {
+    id, status: 'resolved', updateReason: lang === 'zh' ? '用户在面板中结束跟踪。' : 'User ended tracking in the panel.',
+  }, lang === 'zh' ? '已结束跟踪' : 'Tracking ended');
+  if (!result) return;
+  await refreshState();
+  renderDecisions();
+}
+
+// ===== Daily Reflection Rendering =====
+function renderReflection() {
+  const container = document.getElementById('reflection-container');
+  if (!container) return;
+
+  // The engine persists a completed daily review as lastReflection. It applies
+  // only to the date it was generated for; showing it on another date is stale.
+  const displayDate = formatDate(getViewedDate());
+  const reflection = state.reflection?.date === displayDate
+    ? state.reflection
+    : (state.lastReflection?.date === displayDate ? state.lastReflection : null);
+  if (!reflection) {
+    container.innerHTML = '<div class="empty-state">' + (lang === 'zh'
+      ? `${formatDateDisplay(displayDate)} 尚未生成复盘`
+      : `No reflection generated for ${formatDateDisplay(displayDate)}`) + '</div>';
+    return;
+  }
+
+  const ct = reflection.completedToday || {};
+  const gh = reflection.goalHealth?.items || reflection.goalHealth || reflection.goalHealthNeedsAttention || [];
+  const suggestions = reflection.suggestions || [];
+
+  let html = '<div class="reflection-card">';
+
+  // Summary
+  if (ct.summary) {
+    html += '<div class="reflection-summary">' + escapeHtml(ct.summary) + '</div>';
+  }
+
+  // Stats
+  html += '<div class="reflection-section-title">' + (t('reflection.completed') || '今日完成') + '</div>';
+  html += '<div class="reflection-stats">';
+  html += '<div class="reflection-stat"><strong>' + (ct.totalCount || 0) + '</strong>' + (lang === 'zh' ? ' 项总计' : ' total') + '</div>';
+  html += '<div class="reflection-stat"><strong>' + (ct.oneTimeCount || 0) + '</strong>' + (lang === 'zh' ? ' 一次性' : ' one-time') + '</div>';
+  html += '<div class="reflection-stat"><strong>' + (ct.recurringCount || 0) + '</strong>' + (lang === 'zh' ? ' 周期性' : ' recurring') + '</div>';
+  html += '</div>';
+
+  // Goal health signals
+  if (gh.length > 0) {
+    html += '<div class="reflection-section-title">' + (t('reflection.health') || '目标关注信号') + '</div>';
+    for (const item of gh.slice(0, 5)) {
+      const signals = (item.healthSignals || []).map(signal => signal.reason || signal.type).filter(Boolean);
+      html += `
+        <div class="reflection-health-item">
+          <span style="flex:1;color:var(--text-secondary)">${escapeHtml(item.title)}</span>
+          <span style="font-size:11px;color:var(--text-muted)">${escapeHtml(signals.join(' · ') || (lang === 'zh' ? '持续观察' : 'Monitor'))}</span>
+        </div>
+      `;
+    }
+  }
+
+  // Suggestions
+  if (suggestions.length > 0) {
+    html += '<div class="reflection-section-title">' + (t('reflection.suggestions') || 'AI 建议') + '</div>';
+    for (const s of suggestions.slice(0, 5)) {
+      html += '<div class="reflection-suggestion">' + escapeHtml(s.message || s.text || s) + '</div>';
+    }
+  }
+
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+// ===== Attention Signals Rendering =====
+function renderAttentionSignals() {
+  const container = document.getElementById('attention-signals');
+  if (!container) return;
+
+  const summary = state.attentionSummary || null;
+  if (!summary || !summary.byType) {
+    container.style.display = 'none';
+    return;
+  }
+
+  // Build pills by signal type
+  const pills = [];
+  for (const [type, items] of Object.entries(summary.byType)) {
+    if (!items || items.length === 0) continue;
+    const labels = {
+      overdue: lang === 'zh' ? '逾期' : 'Overdue',
+      deadline: lang === 'zh' ? '即将到期' : 'Deadline',
+      blocked: lang === 'zh' ? '阻塞' : 'Blocked',
+      need_decision: lang === 'zh' ? '待决策' : 'Decision',
+      momentum_lost: lang === 'zh' ? '动量丢失' : 'Momentum',
+      hint_followup: lang === 'zh' ? '回溯' : 'Follow-up',
+      conflict: lang === 'zh' ? '冲突' : 'Conflict',
+    };
+    const label = labels[type] || type;
+    pills.push({ type, label, count: items.length });
+  }
+
+  if (pills.length === 0) {
+    container.style.display = 'none';
+    return;
+  }
+
+  container.style.display = 'flex';
+  container.innerHTML = pills.slice(0, 6).map(p =>
+    `<span class="attention-pill ${p.type}">${p.label} <span class="attention-pill-count">${p.count}</span></span>`
+  ).join('');
+}
+
 function renderGoalCard(item, type) {
-  const priorityLevel = item.priority >= 75 ? 'high' : item.priority >= 50 ? 'mid' : 'low';
   const expanded = expandedGoals.has(item.id);
-  const lockedHtml = item.locked ? 
-    `<div class="lock-badge" onclick="event.stopPropagation();unlockPriority('${escapeAttr(type)}','${escapeAttr(item.id)}')" title="Click to unlock, AI will re-score">
-      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-        <rect x="5" y="11" width="14" height="10" rx="2"/>
-        <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
-      </svg>
-      <span>Locked</span>
-    </div>` : '';
   
   // DDL countdown and overdue marker (currentGoal only)
   let ddlHtml = '';
@@ -1644,20 +1732,23 @@ function renderGoalCard(item, type) {
     ? `<div class="goal-desc">${escapeHtml(item.description)}</div>`
     : '';
 
+  // Linked notes under the goal: explicit noteIds plus topic-fallback.
+  const linkedNotes = getLinkedNotesForGoal(item);
+  const _goalNoteIds = new Set(Array.isArray(item.noteIds) ? item.noteIds : []);
+  if (item.topicId) _collectTopicNoteIds(item.topicId).forEach(id => _goalNoteIds.add(id));
+  const noteBadge = (_goalNoteIds.size > 0 && (state.notes || []).some(n => _goalNoteIds.has(n.id)))
+    ? `<span class="goal-note-badge" title="${t('goal.linkedNotes') || '关联笔记'}">📎${_goalNoteIds.size}</span>`
+    : '';
+
   return `
     <div class="goal-card${expanded ? ' expanded' : ''}${type === 'currentGoal' && item.overdue ? ' goal-overdue' : ''}${item.completed ? ' completed' : ''}">
       <div class="goal-row" onclick="toggleGoalExpand('${escapeAttr(type)}','${escapeAttr(item.id)}')">
         <span class="goal-caret">${expanded ? '▾' : '▸'}</span>
         <div class="goal-info">
-          <div class="goal-title">${escapeHtml(item.title)} ${typeTag}</div>
+          <div class="goal-title">${escapeHtml(item.title)} ${typeTag}${noteBadge}</div>
           ${ddlHtml}
         </div>
-        <div class="goal-priority">
-          ${lockedHtml}
-          <div class="priority-badge ${item.locked ? 'locked' : ''}" data-level="${priorityLevel}"
-            onclick="event.stopPropagation();openPriorityModal('${escapeAttr(type)}','${escapeAttr(item.id)}','${escapeAttr(item.title)}',${item.priority})">
-            ${item.priority}
-          </div>
+        <div class="goal-actions">
           ${type === 'currentGoal' || type === 'strategicGoal' ? `<div class="goal-complete-btn${item.completed ? ' completed' : ''}" onclick="event.stopPropagation();toggleGoalComplete('${escapeAttr(item.id)}', ${!item.completed})" title="${item.completed ? t('goal.markIncomplete') : t('goal.markComplete')}">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="20 6 9 17 4 12"/>
@@ -1670,9 +1761,34 @@ function renderGoalCard(item, type) {
           </div>
         </div>
       </div>
-      ${expanded ? `<div class="goal-body">${descHtml}<div class="goal-derived">${renderDerivedForGoal(item, type)}</div></div>` : ''}
+      ${expanded ? `<div class="goal-body">${descHtml}${linkedNotes}${renderGoalEnhanced(item)}<div class="goal-derived">${renderDerivedForGoal(item, type)}</div></div>` : ''}
     </div>
   `;
+}
+
+// ===== Goal Enhanced Fields =====
+function renderGoalEnhanced(item) {
+  let html = '';
+  if (!item.why && !item.obstacle && !item.statusSignal && !item.nextStep) return '';
+
+  html += '<div class="goal-enhanced">';
+  if (item.why) {
+    html += '<div class="goal-field"><div class="goal-field-label">' + (t('goal.why') || '为什么重要') + '</div><div class="goal-field-value">' + escapeHtml(item.why) + '</div></div>';
+  }
+  if (item.obstacle) {
+    html += '<div class="goal-field"><div class="goal-field-label">' + (t('goal.obstacle') || '当前障碍') + '</div><div class="goal-field-value">' + escapeHtml(item.obstacle) + '</div></div>';
+  }
+  if (item.statusSignal) {
+    const signalLabel = t('goal.signal.' + item.statusSignal) || item.statusSignal;
+    const reason = item.statusReason ? '<div class="goal-status-reason">' + escapeHtml(item.statusReason) + '</div>' : '';
+    html += '<div class="goal-field"><div class="goal-field-label">' + (t('goal.status') || '当前状态') + '</div>';
+    html += '<div class="goal-status-signal ' + escapeAttr(item.statusSignal) + '">' + escapeHtml(signalLabel) + '</div>' + reason + '</div>';
+  }
+  if (item.nextStep) {
+    html += '<div class="goal-field"><div class="goal-field-label">' + (t('goal.nextStep') || '下一步') + '</div><div class="goal-field-value">' + escapeHtml(item.nextStep) + '</div></div>';
+  }
+  html += '</div>';
+  return html;
 }
 
 // ===== Goal expansion: derived tasks / sub-goals =====
@@ -1709,7 +1825,6 @@ async function toggleGoalComplete(id, completed) {
   const result = await runAction('/api/goal/complete', { id, completed }, completed ? 'Goal completed' : 'Goal reopened');
   if (!result) return;
   await refreshState();
-  invalidateTodayBriefing();
   renderAll();
 }
 
@@ -1753,6 +1868,7 @@ function renderDerivedForGoal(item, type) {
     }
     return subs.map(sub => {
       const tasks = getDerivedTasksForGoal(sub.id);
+      const subNotes = getLinkedNotesForGoal(sub);
       return `
         <div class="goal-derived-sub">
           <div class="goal-derived-sub-head">
@@ -1766,6 +1882,7 @@ function renderDerivedForGoal(item, type) {
               </div>
             </div>
           </div>
+          ${subNotes}
           ${tasks.length ? tasks.map(renderDerivedTaskRow).join('') : `<div class="goal-derived-empty">· ${t('goal.noDerived')}</div>`}
         </div>`;
     }).join('');
@@ -1858,7 +1975,8 @@ function renderLastUpdated() {
 
 // ===== Interaction: Task Toggle =====
 async function toggleTask(date, taskId) {
-  await postJson('/api/task/toggle', { date, taskId });
+  const result = await postJson('/api/task/toggle', { date, taskId });
+  if (!result || result.success === false || result.error) return;
   // SSE will auto-refresh, but also refresh manually for instant feedback
   await refreshState();
   renderAll();
@@ -1919,54 +2037,18 @@ async function confirmTimeEditor() {
   }
   const result = context.kind === 'task'
     ? await postJson('/api/task/update', { date: context.date, taskId: context.id, time: newTime, duration: newDuration })
-    : await postJson('/api/errand/update', { id: context.id, time: newTime, duration: newDuration });
+    : await postJson('/api/errand/update', { id: context.id, time: newTime, duration: newDuration, date: newTime ? context.date || undefined : '' });
   if (!result || result.success === false) return;
   closeTimeEditor();
   await refreshState();
   renderAll();
 }
 
-// ===== Interaction: Priority Adjustment =====
-function openPriorityModal(type, id, name, currentPriority) {
-  priorityModalContext = { type, id, name, currentPriority };
-  document.getElementById('priority-target-name').textContent = name;
-  document.getElementById('priority-slider').value = currentPriority;
-  document.getElementById('priority-value-display').textContent = currentPriority;
-  document.getElementById('priority-modal').style.display = '';
-}
-
-function closePriorityModal(event) {
-  if (event && event.target !== event.currentTarget) return;
-  document.getElementById('priority-modal').style.display = 'none';
-  priorityModalContext = null;
-}
-
-function updatePriorityDisplay(value) {
-  document.getElementById('priority-value-display').textContent = value;
-}
-
-async function confirmPriority() {
-  if (!priorityModalContext) return;
-  const { type, id } = priorityModalContext;
-  const priority = parseInt(document.getElementById('priority-slider').value);
-  
-  await postJson('/api/priority/update', { type, id, priority });
-  closePriorityModal();
-  await refreshState();
-  renderAll();
-}
-
-async function unlockPriority(type, id) {
-  await postJson('/api/priority/unlock', { type, id });
-  await refreshState();
-  renderAll();
-}
-
 // ===== Interaction: Manually Add Event =====
 function showAddEventForm() {
-  // Default date = today
-  const today = formatDate(new Date());
-  document.getElementById('event-date').value = today;
+  // Default date = the day the user is currently viewing.
+  const date = formatDate(getViewedDate());
+  document.getElementById('event-date').value = date;
   document.getElementById('event-time').value = '09:00';
   document.getElementById('event-title').value = '';
   document.getElementById('event-desc').value = '';
@@ -1998,10 +2080,7 @@ async function confirmAddEvent() {
   
   closeEventModal();
   // Navigate to the event's date
-  const today = new Date(formatDate(new Date()));
-  const eventDate = new Date(date);
-  const diffDays = Math.round((eventDate - today) / (1000 * 60 * 60 * 24));
-  currentDayOffset = diffDays;
+  setViewedDate(parseLocalDate(date));
   
   await refreshState();
   renderAll();
@@ -2009,12 +2088,10 @@ async function confirmAddEvent() {
 
 // ===== Day Navigation =====
 function navigateDay(direction) {
-  currentDayOffset += direction;
-  renderFocusHero();
-  renderBriefing();
-  renderRelatedNotes();
-  renderSchedule();
-  renderErrands();
+  const next = getViewedDate();
+  next.setDate(next.getDate() + direction);
+  setViewedDate(next);
+  renderViewedDate();
 }
 
 // ===== Calendar View =====
@@ -2022,7 +2099,7 @@ let calendarYear, calendarMonth;  // Currently displayed year and month
 
 function openCalendar() {
   // Start from the currently viewed date
-  const baseDate = getOffsetDate(currentDayOffset);
+  const baseDate = getViewedDate();
   calendarYear = baseDate.getFullYear();
   calendarMonth = baseDate.getMonth();
   renderCalendar();
@@ -2047,14 +2124,12 @@ function navigateCalendarMonth(direction) {
 }
 
 function goToToday() {
-  currentDayOffset = 0;
+  setViewedDate(new Date());
   const today = new Date();
   calendarYear = today.getFullYear();
   calendarMonth = today.getMonth();
   renderCalendar();
-  renderFocusHero();
-  renderBriefing();
-  renderSchedule();
+  renderViewedDate();
 }
 
 function renderCalendar() {
@@ -2071,9 +2146,12 @@ function renderCalendar() {
       scheduledDays.add(dateStr);
     }
   }
+  for (const action of (state.errands || [])) {
+    if (action.date && !action.completed) scheduledDays.add(action.date);
+  }
 
   // Currently selected date
-  const selectedDate = formatDate(getOffsetDate(currentDayOffset));
+  const viewedDate = formatDate(getViewedDate());
   const todayStr = formatDate(new Date());
 
   // Calculate calendar grid cells
@@ -2102,7 +2180,7 @@ function renderCalendar() {
     const dateStr = formatDate(new Date(calendarYear, calendarMonth, d));
     const hasTasks = scheduledDays.has(dateStr);
     const isToday = dateStr === todayStr;
-    const isSelected = dateStr === selectedDate;
+    const isSelected = dateStr === viewedDate;
     let classes = 'calendar-day';
     if (hasTasks) classes += ' has-tasks';
     if (isToday) classes += ' today';
@@ -2123,21 +2201,14 @@ function renderCalendar() {
 }
 
 function selectCalendarDay(dateStr) {
-  // Calculate offset
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const target = new Date(dateStr);
-  target.setHours(0, 0, 0, 0);
-  const diffDays = Math.round((target - today) / (1000 * 60 * 60 * 24));
-  currentDayOffset = diffDays;
+  const target = parseLocalDate(dateStr);
+  if (!target) return;
+  setViewedDate(target);
 
   // Close calendar
   document.getElementById('calendar-modal').style.display = 'none';
 
-  // Refresh briefing, schedule, and errands
-  renderBriefing();
-  renderSchedule();
-  renderErrands();
+  renderViewedDate();
 }
 
 // ===== Interaction: Manually Add Strategic Goal/Constraint =====
@@ -2147,8 +2218,6 @@ function showAddGoalForm(type) {
     type === 'strategicGoal' ? t('modal.goal.title.strategic') : t('modal.goal.title.constraint');
   document.getElementById('goal-title').value = '';
   document.getElementById('goal-desc').value = '';
-  document.getElementById('goal-priority-slider').value = 50;
-  document.getElementById('goal-priority-display').textContent = '50';
   document.getElementById('goal-modal').style.display = '';
   // Auto-focus title input
   setTimeout(() => document.getElementById('goal-title').focus(), 100);
@@ -2163,7 +2232,6 @@ function closeGoalModal(event) {
 async function confirmAddGoal() {
   const title = document.getElementById('goal-title').value.trim();
   const desc = document.getElementById('goal-desc').value.trim();
-  const priority = parseInt(document.getElementById('goal-priority-slider').value);
   
   if (!title) {
     alert(t('alert.goalRequired'));
@@ -2173,8 +2241,7 @@ async function confirmAddGoal() {
   const result = await runAction('/api/goal/add', {
     type: goalModalType,
     title,
-    description: desc,
-    priority
+    description: desc
   }, 'Goal added');
   if (!result) return;
   
@@ -2189,9 +2256,9 @@ async function confirmAddGoal() {
 function renderErrands() {
   const container = document.getElementById('errands-container');
   const dateEl = document.getElementById('errands-date');
-  const priorityOrder = { must: 0, should: 1, nice: 2 };
+  const commitmentOrder = { must: 0, should: 1, nice: 2 };
   const unscheduledErrands = (state.errands || [])
-    .filter(action => !action.time)
+    .filter(action => !action.date && !action.time)
     .map(action => ({ kind: 'action', item: action, date: action.date || null }));
   const unscheduledTasks = Object.entries(state.schedule?.days || {}).flatMap(([date, day]) =>
     (day.tasks || []).filter(task => !task.time).map(task => ({ kind: 'task', item: task, date }))
@@ -2200,129 +2267,336 @@ function renderErrands() {
     const aDone = a.item.completed ? 1 : 0;
     const bDone = b.item.completed ? 1 : 0;
     if (aDone !== bDone) return aDone - bDone;
-    const ap = a.kind === 'action' ? (priorityOrder[a.item.priority] ?? 1) : 1;
-    const bp = b.kind === 'action' ? (priorityOrder[b.item.priority] ?? 1) : 1;
+    const ap = a.kind === 'action' ? (commitmentOrder[a.item.commitmentLevel] ?? 1) : 1;
+    const bp = b.kind === 'action' ? (commitmentOrder[b.item.commitmentLevel] ?? 1) : 1;
     if (ap !== bp) return ap - bp;
     return (a.date || '9999-12-31').localeCompare(b.date || '9999-12-31');
   });
-  dateEl.textContent = currentView === 'all' ? t('errand.all') : t('action.unscheduled');
+  if (dateEl) dateEl.textContent = currentView === 'all' ? t('errand.all') : t('action.unscheduled');
 
+  if (!container) return;
   if (actions.length === 0) {
     container.innerHTML = '<div class="empty-state">' + t('empty.errands') + '</div>';
     return;
   }
 
-  container.innerHTML = actions.map(action => action.kind === 'task'
+  const shown = actions.slice(0, visibleCounts.errands);
+  let html = shown.map(action => action.kind === 'task'
     ? unscheduledTaskCardHtml(action.item, action.date)
-    : errandCardHtml(action.item)).join('');
+    : errandCardHtml(action.item)).join('') + renderMoreButton('errands', shown.length, actions.length);
+  container.innerHTML = html;
 }
 
-function getPendingReviews() {
-  return (state.pendingReviews || []).filter(review => review && review.status === 'pending');
+function completedActionCardHtml(action) {
+  const linkedNotes = getLinkedNotesHtml(action.linkedNoteIds);
+  const contextKey = `completed:${action.id}`;
+  const timeStr = action.completedAt ? new Date(action.completedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '';
+  const restoreButton = action.taskId
+    ? `<button type="button" class="action-undo-button" onclick="event.stopPropagation();restoreCompletedTask('${escapeAttr(action.scheduleDate || '')}','${escapeAttr(action.taskId)}')">${t('errand.undoComplete') || '恢复'}</button>`
+    : `<button type="button" class="action-undo-button" onclick="event.stopPropagation();undoCompleteErrand('${escapeAttr(action.id)}')">${t('errand.undoComplete') || '恢复'}</button>`;
+  return `
+    <div class="errand-card completed-action">
+      <span class="commitment-tag done">${t('errand.completed') || 'Done'}</span>
+      <div class="errand-info">
+        <div class="errand-title">${escapeHtml(action.title)}</div>
+        <div class="errand-meta">
+          ${timeStr ? escapeHtml(timeStr) + ' · ' : ''}<span class="task-retention done">${action.outcome || 'done'}</span>
+          ${action.summary ? ' · ' + escapeHtml(action.summary) : ''}
+        </div>
+        ${linkedNotes}
+        ${renderActionContextSummary(action, contextKey)}
+        ${renderActionContext(action, contextKey)}
+      </div>
+      <div class="errand-actions">
+        ${restoreButton}
+      </div>
+    </div>
+  `;
 }
 
-function renderPendingReviewBadge() {
-  const pending = getPendingReviews();
-  const button = document.getElementById('pending-review-button');
-  const count = document.getElementById('pending-review-count');
-  if (count) count.textContent = pending.length ? t('settings.pending', { n: pending.length }) : '';
-  if (button) {
-    button.classList.toggle('has-pending', pending.length > 0);
-    button.setAttribute('aria-label', pending.length ? t('settings.pending', { n: pending.length }) : t('modal.review.title'));
+// P0-4: Replace getTodayCompletedActions with getCompletedForDate.
+// Reads completed tasks from the schedule file for the given date (not UTC),
+// then supplements with errand completion records (errands are not in schedule).
+function getCompletedForDate(displayDate) {
+  if (!displayDate) return [];
+
+  // 1. Completed tasks from schedule file (tasks belong to this date)
+  const dayData = state.schedule?.days?.[displayDate];
+  const completedTasks = (dayData?.tasks || [])
+    .filter(t => t.completed)
+    .map(t => ({
+      id: t.id,
+      taskId: t.id,
+      scheduleDate: displayDate,
+      title: t.title,
+      completedAt: t.completedAt,
+      completedBy: t.completedBy || null,
+      source: t.source || null,
+      time: t.time || null,
+      relatedGoalId: t.relatedGoalId || null,
+      pattern: t.pattern || 'one-time',
+      category: t.category || 'misc',
+      outcome: 'done',
+      summary: '',
+      linkedNoteIds: t.noteIds || [],
+      linkedDecisionIds: t.decisionIds || [],
+      contextRefs: t.contextRefs || [],
+    }));
+
+  // 2. Errand completion records (errands are not in schedule files)
+  const completedErrands = (state.completedActions || [])
+    .filter(a => a.scheduleDate === displayDate && a.errandId)
+    .map(a => ({
+      ...a,
+      // Ensure errand records have consistent shape for card rendering
+      scheduleDate: a.scheduleDate || displayDate,
+    }));
+
+  return [...completedTasks, ...completedErrands]
+    .sort((a, b) => new Date(b.completedAt || 0) - new Date(a.completedAt || 0));
+}
+
+// Keep old name as alias for backward compatibility (FocusHero uses it)
+function getTodayCompletedActions(targetDate) {
+  const displayDate = targetDate || formatDate(getViewedDate());
+  return getCompletedForDate(displayDate);
+}
+
+// P2-1: Get cross-day completions — tasks completed today but belonging to
+// a different date. Shows when a user finishes yesterday's task at midnight.
+function getCrossDayCompleted(today) {
+  return (state.completedActions || [])
+    .filter(a => {
+      if (!a.completedAt || !a.scheduleDate) return false;
+      const completedDate = a.completedAt.slice(0, 10);
+      return completedDate === today && a.scheduleDate !== today;
+    })
+    .map(a => ({
+      id: a.id,
+      title: a.title,
+      scheduleDate: a.scheduleDate,
+      completedAt: a.completedAt,
+      pattern: a.pattern || 'one-time',
+      errandId: a.errandId || null,
+      outcome: a.outcome || 'done',
+      summary: a.summary || '',
+      linkedNoteIds: a.linkedNoteIds || [],
+    }))
+    .sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt));
+}
+
+function renderCompletedActions() {
+  const container = document.getElementById('completed-container');
+  if (!container) return;
+  const displayDate = formatDate(getViewedDate());
+  const todayCompleted = getCompletedForDate(displayDate);
+  const crossDayCompleted = getCrossDayCompleted(displayDate);
+
+  if (todayCompleted.length === 0 && crossDayCompleted.length === 0) {
+    container.innerHTML = '<div class="empty-state">' + (t('empty.completed') || '暂无已完成事项') + '</div>';
+    return;
   }
-}
 
-function openPendingReviewModal() {
-  const modal = document.getElementById('pending-review-modal');
-  const list = document.getElementById('pending-review-list');
-  if (!modal || !list) return;
-  const pending = getPendingReviews();
-  if (!pending.length) {
-    list.innerHTML = `<div class="empty-state">${t('modal.review.empty')}</div>`;
-  } else {
-    list.innerHTML = pending.map(review => {
-      if (review.type === 'note_organization') {
-        const source = (state.notes || []).find(note => note.id === review.noteId);
-        const proposal = review.proposal || {};
-        const conflicts = (proposal.conflicts || []).map(conflict => `<li>${escapeHtml(conflict)}</li>`).join('');
-        return `<article class="review-card">
-          <div class="review-card-kind">${t('review.organization')}</div>
-          <div class="review-card-title">${escapeHtml(proposal.title || review.title || t('note.pendingTitle'))}</div>
-          <div class="review-card-source">${escapeHtml(source?.content || t('note.contentMissing'))}</div>
-          <div class="review-card-proposal">${escapeHtml(proposal.topic || '')} · ${escapeHtml(proposal.category || '')}</div>
-          ${proposal.reason ? `<div class="review-card-reason">${escapeHtml(proposal.reason)}</div>` : ''}
-          ${conflicts ? `<ul class="review-card-conflicts">${conflicts}</ul>` : ''}
-          <div class="review-card-actions">
-            <button class="modal-btn cancel" onclick="resolvePendingReview('${escapeAttr(review.id)}','reject')">${t('review.reject')}</button>
-            <button class="modal-btn confirm" onclick="resolvePendingReview('${escapeAttr(review.id)}','accept')">${t('review.accept')}</button>
-          </div>
-        </article>`;
-      }
-      if (review.type === 'note_conflict') {
-        const noteIds = review.noteIds || [];
-        const notePreviews = noteIds.map(nid => {
-          const n = (state.notes || []).find(note => note.id === nid);
-          return n ? `<div class="review-note-preview"><strong>${escapeHtml(n.title || 'Note')}</strong><p>${escapeHtml((n.content || '').slice(0, 180))}${(n.content || '').length > 180 ? '...' : ''}</p></div>` : '';
-        }).join('');
-        return `<article class="review-card conflict">
-          <div class="review-card-kind">${t('review.noteConflict') || '笔记矛盾'}</div>
-          <div class="review-card-title">${escapeHtml(review.title || t('review.question'))}</div>
-          <div class="review-card-source">${escapeHtml(review.description || '')}</div>
-          ${review.reasoning ? `<div class="review-card-reason">${escapeHtml(review.reasoning)}</div>` : ''}
-          ${notePreviews ? `<div class="review-note-previews">${notePreviews}</div>` : ''}
-          <div class="review-card-actions">
-            <button class="modal-btn cancel" onclick="resolvePendingReview('${escapeAttr(review.id)}','reject')">${t('review.ignore') || '忽略'}</button>
-            <button class="modal-btn confirm" onclick="resolvePendingReview('${escapeAttr(review.id)}','accept')">${t('review.confirm') || '确认'}</button>
-          </div>
-        </article>`;
-      }
-      const options = (review.options || []).map(option => `<li>${escapeHtml(option)}</li>`).join('');
-      return `<article class="review-card conflict">
-        <div class="review-card-kind">${t('review.conflict')}</div>
-        <div class="review-card-title">${escapeHtml(review.title || t('review.question'))}</div>
-        <div class="review-card-source">${escapeHtml(review.question || '')}</div>
-        ${options ? `<ul class="review-card-conflicts">${options}</ul>` : ''}
-        <div class="review-card-actions"><button class="modal-btn confirm" onclick="resolvePendingReview('${escapeAttr(review.id)}','accept')">${t('review.done')}</button></div>
-      </article>`;
-    }).join('');
+  let html = '';
+  if (todayCompleted.length > 0) {
+    html += todayCompleted.map(a => completedActionCardHtml(a)).join('');
   }
-  modal.style.display = '';
+  if (crossDayCompleted.length > 0) {
+    const crossDayLabel = lang === 'zh' ? '跨日完成（今日操作）' : 'Cross-day (completed today)';
+    html += `<div class="cross-day-section">
+      <div class="cross-day-header">${escapeHtml(crossDayLabel)}</div>
+      ${crossDayCompleted.map(a => {
+        const originLabel = lang === 'zh'
+          ? `属于 ${escapeHtml(a.scheduleDate)}`
+          : `Belongs to ${escapeHtml(a.scheduleDate)}`;
+        const timeStr = a.completedAt ? new Date(a.completedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '';
+        const restoreButton = a.errandId
+          ? `<button type="button" class="action-undo-button" onclick="event.stopPropagation();undoCompleteErrand('${escapeAttr(a.id)}')">${t('errand.undoComplete') || '恢复'}</button>`
+          : '';
+        return `<div class="errand-card completed-action cross-day">
+          <span class="commitment-tag done">${t('errand.completed') || 'Done'}</span>
+          <div class="errand-info">
+            <div class="errand-title">${escapeHtml(a.title)}</div>
+            <div class="errand-meta">
+              ${timeStr ? escapeHtml(timeStr) + ' · ' : ''}${originLabel}
+              ${a.summary ? ' · ' + escapeHtml(a.summary) : ''}
+            </div>
+          </div>
+          <div class="errand-actions">${restoreButton}</div>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+  html += '<div class="ai-followup-reminder" role="note">' + escapeHtml(t('completed.aiFollowup')) + '</div>';
+  container.innerHTML = html;
 }
 
-function closePendingReviewModal(event) {
-  if (event && event.target !== event.currentTarget) return;
-  const modal = document.getElementById('pending-review-modal');
-  if (modal) modal.style.display = 'none';
+function getActionContextRefs(action) {
+  const refs = [];
+  const seen = new Set();
+  const add = (type, id, role) => {
+    if (!id || !['note', 'decision'].includes(type)) return;
+    const key = `${type}:${id}:${role || ''}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    refs.push({ type, id, role: role || (type === 'decision' ? 'decision_basis' : 'reference') });
+  };
+  for (const ref of (Array.isArray(action.contextRefs) ? action.contextRefs : [])) add(ref.type, ref.id, ref.role);
+  for (const id of (action.noteIds || action.linkedNoteIds || [])) add('note', id, 'reference');
+  for (const id of (action.decisionIds || action.linkedDecisionIds || [])) add('decision', id, 'decision_basis');
+  return refs;
 }
 
-async function resolvePendingReview(reviewId, decision) {
-  const result = await runAction('/api/review/resolve', { reviewId, decision }, t('review.done'));
-  if (!result) return;
-  await refreshState();
+function getContextRoleLabel(role) {
+  const labels = lang === 'zh'
+    ? { instruction: '执行说明', reference: '参考', constraint: '限制', decision_basis: '决策依据', result: '结果' }
+    : { instruction: 'Instruction', reference: 'Reference', constraint: 'Constraint', decision_basis: 'Decision basis', result: 'Result' };
+  return labels[role] || labels.reference;
+}
+
+function getActionGoal(action) {
+  const goalId = action.relatedGoalId || action.goalId || action.linkedGoalId || action.relatedStrategicGoalId;
+  return [...(state.currentGoals || []), ...(state.strategicGoals || [])].find(goal => goal.id === goalId) || null;
+}
+
+function contextText(value, length = 260) {
+  const text = String(value || '').trim();
+  return text.length > length ? text.slice(0, length) + '…' : text;
+}
+
+function renderActionContextSummary(action, contextKey) {
+  const refs = getActionContextRefs(action);
+  const goal = getActionGoal(action);
+  const topicId = action.topicId || action.linkedTopicId;
+  const reasons = [action.contextReason, action.placementReason].filter(Boolean);
+  if (!refs.length && !goal && !topicId && !reasons.length) return '';
+  const expanded = expandedActionContexts.has(contextKey);
+  const parts = [];
+  const noteCount = refs.filter(ref => ref.type === 'note').length;
+  const decisionCount = refs.filter(ref => ref.type === 'decision').length;
+  if (goal) parts.push(lang === 'zh' ? '关联目标' : 'Goal');
+  // Do not collapse different context types into “N linked items”: a decision
+  // is evidence for the action, not a third note.  The compact header must
+  // make that distinction before the user expands the card.
+  if (noteCount) parts.push(lang === 'zh' ? `${noteCount} 条笔记` : `${noteCount} notes`);
+  if (decisionCount) parts.push(lang === 'zh' ? `${decisionCount} 项决策` : `${decisionCount} decisions`);
+  if (topicId) parts.push(getTopicLabel(topicId));
+  const label = expanded ? (lang === 'zh' ? '收起执行上下文' : 'Hide context') : (lang === 'zh' ? '查看执行上下文' : 'View context');
+  return `<button type="button" class="action-context-toggle" aria-expanded="${expanded}" onclick="event.stopPropagation();toggleActionContext('${escapeAttr(contextKey)}')"><span>${escapeHtml(label)}</span>${parts.length ? `<span class="action-context-summary">${escapeHtml(parts.join(' · '))}</span>` : ''}<span aria-hidden="true">${expanded ? '⌃' : '⌄'}</span></button>`;
+}
+
+function renderActionContext(action, contextKey) {
+  if (!expandedActionContexts.has(contextKey)) return '';
+  const refs = getActionContextRefs(action);
+  const goal = getActionGoal(action);
+  const topicId = action.topicId || action.linkedTopicId;
+  const notes = state.notes || [];
+  const decisions = state.decisions || [];
+  const sections = [];
+
+  if (goal) sections.push(`<div class="action-context-line"><span class="action-context-label">${lang === 'zh' ? '目标' : 'Goal'}</span><span>${escapeHtml(goal.title)}</span></div>`);
+  if (topicId) sections.push(`<div class="action-context-line"><span class="action-context-label">${lang === 'zh' ? '主题' : 'Topic'}</span><span>${escapeHtml(getTopicLabel(topicId))}</span></div>`);
+  if (action.contextReason) sections.push(`<div class="action-context-reason"><span class="action-context-label">${lang === 'zh' ? '为什么关联' : 'Why this context'}</span>${escapeHtml(contextText(action.contextReason, 400))}</div>`);
+  if (action.placementReason) sections.push(`<div class="action-context-reason"><span class="action-context-label">${lang === 'zh' ? '为什么现在做' : 'Why now'}</span>${escapeHtml(contextText(action.placementReason, 400))}</div>`);
+
+  for (const ref of refs) {
+    const entity = ref.type === 'note' ? notes.find(note => note.id === ref.id) : decisions.find(decision => decision.id === ref.id);
+    const typeLabel = ref.type === 'note' ? (lang === 'zh' ? '笔记' : 'Note') : (lang === 'zh' ? '决策' : 'Decision');
+    if (!entity) {
+      sections.push(`<div class="action-context-item missing"><span class="action-context-item-type">${escapeHtml(typeLabel)} · ${escapeHtml(getContextRoleLabel(ref.role))}</span><span>${lang === 'zh' ? '关联内容已不存在' : 'Linked content is no longer available'}</span></div>`);
+      continue;
+    }
+    const openNote = ref.type === 'note'
+      ? `<button type="button" class="action-context-open-note" onclick="event.stopPropagation();openNoteFromKnowledge('${escapeAttr(entity.id)}')">${lang === 'zh' ? '查看完整笔记' : 'Open full note'}</button>`
+      : '';
+    // A note body belongs to the knowledge view.  Rendering it here makes a
+    // single long note stretch every linked action card, so execution context
+    // carries only its title and a deliberate navigation affordance.
+    const detail = ref.type === 'decision' ? (entity.evidence || entity.impact || entity.outcome || '') : '';
+    sections.push(`<div class="action-context-item ${ref.type === 'note' ? 'note-reference' : 'decision-reference'}"><span class="action-context-item-type">${escapeHtml(typeLabel)} · ${escapeHtml(getContextRoleLabel(ref.role))}</span><strong>${escapeHtml(entity.title || '')}</strong>${detail ? `<p>${escapeHtml(contextText(detail))}</p>` : ''}${openNote}</div>`);
+  }
+
+  if (!sections.length) return '';
+  return `<div class="action-context" role="region" aria-label="${lang === 'zh' ? '执行上下文' : 'Execution context'}">${sections.join('')}</div>`;
+}
+
+function toggleActionContext(contextKey) {
+  if (expandedActionContexts.has(contextKey)) expandedActionContexts.delete(contextKey);
+  else expandedActionContexts.add(contextKey);
   renderAll();
-  openPendingReviewModal();
+}
+
+function getLinkedNotesHtml(noteIds) {
+  if (!noteIds || !noteIds.length) return '';
+  const allNotes = state.notes || [];
+  const linked = noteIds
+    .map(id => allNotes.find(n => n.id === id))
+    .filter(Boolean);
+  if (!linked.length) return '';
+  return '<div class="errand-linked-notes">' +
+    linked.map(n => `<span class="errand-linked-note" title="${escapeHtml(n.title)}">📎 ${escapeHtml(n.title)}</span>`).join('') +
+    '</div>';
+}
+
+// Topic-fallback linked notes: when an entity has no explicit noteIds, still
+// surface notes that share its topic (or its related goal's topic) so the
+// knowledge-base association is visible on cards even before the AI links them.
+function _collectTopicNoteIds(topicId) {
+  if (!topicId) return [];
+  return (state.notes || []).filter(n => n.topicId === topicId).map(n => n.id);
+}
+function _goalById(id) {
+  if (!id) return null;
+  const g = state.goals || {};
+  return [...(g.currentGoals || []), ...(g.strategicGoals || [])].find(x => x.id === id) || null;
+}
+function getLinkedNotesForTask(task) {
+  const ids = new Set(Array.isArray(task.noteIds) ? task.noteIds : []);
+  const g = _goalById(task.relatedGoalId);
+  if (g) {
+    (g.noteIds || []).forEach(id => ids.add(id));
+    _collectTopicNoteIds(g.topicId).forEach(id => ids.add(id));
+  }
+  if (task.topicId) _collectTopicNoteIds(task.topicId).forEach(id => ids.add(id));
+  return getLinkedNotesHtml(Array.from(ids));
+}
+function getLinkedNotesForGoal(goal) {
+  const ids = new Set(Array.isArray(goal.noteIds) ? goal.noteIds : []);
+  if (goal.topicId) _collectTopicNoteIds(goal.topicId).forEach(id => ids.add(id));
+  return getLinkedNotesHtml(Array.from(ids));
 }
 
 function errandCardHtml(e) {
-  const priorityLabel = { must: t('errand.must'), should: t('errand.should'), nice: t('errand.nice') };
+  const commitmentLabel = { must: t('errand.must'), should: t('errand.should'), nice: t('errand.nice') };
   const retention = getRetentionInfo(e);
+  const patternTag = e.pattern === 'recurring'
+    ? '<span class="errand-pattern-tag recurring">🔄</span>'
+    : '';
+  const linkedNotes = getLinkedNotesHtml(e.noteIds);
+  const contextKey = `errand:${e.id}`;
   return `
-    <div class="errand-card action-queue${e.completed ? ' completed' : ''}">
-      <span class="errand-priority-tag ${e.priority}">${priorityLabel[e.priority] || t('errand.should')}</span>
-      <div class="errand-info">
-        <div class="errand-title">${escapeHtml(e.title)}</div>
-        <div class="errand-meta">
-          ${e.date ? escapeHtml(e.date) + ' · ' : ''}${t('action.unscheduled')} · <span class="task-retention ${retention.key}">${retention.label}</span>
-          ${e.note ? ' · ' + escapeHtml(e.note) : ''}
-        </div>
+    <div class="task-card action-queue unscheduled-action${e.completed ? ' completed' : ''}">
+      <div class="task-time action-queue-time">
+        <span class="commitment-tag ${e.commitmentLevel || 'should'}">${commitmentLabel[e.commitmentLevel] || t('errand.should')}</span>
+        ${patternTag}
       </div>
-      <div class="errand-actions">
-        <button type="button" class="action-time-button" onclick="event.stopPropagation();editActionTime('${escapeAttr(e.id)}', '', ${Number(e.duration) || 60})">${t('action.scheduleTime')}</button>
-        <div class="errand-checkbox ${e.completed ? 'checked' : ''}" onclick="event.stopPropagation();toggleErrand('${escapeAttr(e.id)}')" title="${e.completed ? t('errand.done') : t('errand.undo')}"></div>
-        <div class="errand-delete-btn" onclick="event.stopPropagation();deleteErrand('${escapeAttr(e.id)}','${escapeAttr(e.title)}')" title="Delete">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
-          </svg>
+      <div class="task-body">
+        <div class="task-title">${escapeHtml(e.title)}</div>
+        <div class="task-desc">
+          ${e.date ? escapeHtml(e.date) + ' · ' : ''}${t('action.unscheduled')}${e.note ? ' · ' + escapeHtml(e.note) : ''}
+        </div>
+        ${linkedNotes}
+        ${renderActionContextSummary(e, contextKey)}
+        ${renderActionContext(e, contextKey)}
+        <div class="task-footer">
+          <div class="task-meta"><span class="task-retention ${retention.key}">${retention.label}</span></div>
+          <div class="task-card-actions">
+            <button type="button" class="action-time-button" onclick="event.stopPropagation();editActionTime('${escapeAttr(e.id)}', '', ${Number(e.duration) || 60})">${t('action.scheduleTime')}</button>
+            <button type="button" class="task-delete-btn" onclick="event.stopPropagation();deleteErrand('${escapeAttr(e.id)}','${escapeAttr(e.title)}')" title="Delete" aria-label="Delete">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+            </button>
+            <div class="task-checkbox ${e.completed ? 'checked' : ''}" onclick="event.stopPropagation();toggleErrand('${escapeAttr(e.id)}')" title="${e.completed ? t('errand.done') : t('errand.undo')}"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -2330,12 +2604,15 @@ function errandCardHtml(e) {
 }
 
 function unscheduledTaskCardHtml(task, date) {
+  const contextKey = `task:${date}:${task.id}`;
   return `
     <div class="errand-card action-queue${task.completed ? ' completed' : ''}">
-      <span class="errand-priority-tag should">${t('action.task')}</span>
+      <span class="commitment-tag should">${t('action.task')}</span>
       <div class="errand-info">
         <div class="errand-title">${escapeHtml(translateTaskTitle(task.title))}</div>
         <div class="errand-meta">${escapeHtml(date)} · ${t('action.unscheduled')}</div>
+        ${renderActionContextSummary(task, contextKey)}
+        ${renderActionContext(task, contextKey)}
       </div>
       <div class="errand-actions">
         <button type="button" class="action-time-button" onclick="event.stopPropagation();editTaskTime('${escapeAttr(date)}', '${escapeAttr(task.id)}', '', ${Number(task.duration) || 60})">${t('action.scheduleTime')}</button>
@@ -2345,7 +2622,7 @@ function unscheduledTaskCardHtml(task, date) {
   `;
 }
 
-// ===== Life Notes Rendering (topic-driven; six-domain model removed) =====
+// ===== Notes Rendering (topic-driven; six-domain model removed) =====
 let currentNoteTab = '__all';
 // Notes are shown as a short summary (Layer-0 style); the user clicks to expand the full content.
 const expandedNotes = new Set();
@@ -2362,6 +2639,7 @@ function getTopicLabel(topicId) {
 
 function switchNoteTab(topic) {
   currentNoteTab = topic;
+  visibleCounts.notes = PAGE_SIZE.notes;
   document.querySelectorAll('.note-tab').forEach(tab => tab.classList.remove('active'));
   const targetTab = document.querySelector(`.note-tab[data-topic="${escapeAttr(topic)}"]`);
   if (targetTab) targetTab.classList.add('active');
@@ -2372,7 +2650,7 @@ function switchNoteTab(topic) {
 function renderNoteTopicTabs() {
   const tabsEl = document.querySelector('#section-notes .note-tabs');
   if (!tabsEl) return;
-  const notes = Array.isArray(state.notes) ? state.notes : [];
+  const notes = Array.isArray(state.notes) ? state.notes.filter(note => note.lifecycleState !== 'archived') : [];
   const allTopicIds = [...new Set(notes.filter(note => !note.needsEnrichment).map(n => n.topicId).filter(Boolean))];
   // Defensive: filter out topics that no longer exist in the topic index
   const validTopicIds = allTopicIds.filter(tid => (state.topicIndex || []).some(t => t.id === tid));
@@ -2397,7 +2675,7 @@ function renderNoteTopicTabs() {
 function renderNotes() {
   const container = document.getElementById('notes-container');
   if (!container) return;  // section may not be in DOM — never let this abort renderAll
-  const notes = Array.isArray(state.notes) ? state.notes.slice() : [];
+  const notes = Array.isArray(state.notes) ? state.notes.filter(note => note.lifecycleState !== 'archived') : [];
   const filtered = currentNoteTab === '__all'
     ? notes
     : currentNoteTab === '__unclassified'
@@ -2416,16 +2694,19 @@ function renderNotes() {
     (b.createdAt || '').localeCompare(a.createdAt || '')
   );
 
-  container.innerHTML = sorted.map(n => {
+  const shown = sorted.slice(0, visibleCounts.notes);
+  container.innerHTML = shown.map(n => {
     const titleText = n.title || t('note.pendingTitle');
     const expanded = expandedNotes.has(n.id);
+    const detail = noteDetails.get(n.id);
+    const fullContent = detail?.content;
     const created = formatDateTime(n.createdAt);
     const when = formatNoteWhen(n); // user-specified occurrence time
     const whenHtml = when
       ? `<span class="note-when-tag" title="${t('note.when.tooltip')}">${escapeHtml(when)}</span>`
       : '';
     const topicBadge = n.topicId
-      ? `<span class="related-note-topic">${escapeHtml(getTopicLabel(n.topicId))}</span>`
+      ? `<span class="note-topic-badge">${escapeHtml(getTopicLabel(n.topicId))}</span>`
       : '';
     return `
       <div class="note-card${expanded ? ' expanded' : ''}">
@@ -2442,7 +2723,7 @@ function renderNotes() {
           const isEditing = editingNoteId === n.id;
           if (isEditing) {
             return `<div class="note-content-full note-editing">
-              <textarea id="note-edit-textarea-${escapeAttr(n.id)}" class="note-edit-textarea">${escapeHtml(n.content || '')}</textarea>
+              <textarea id="note-edit-textarea-${escapeAttr(n.id)}" class="note-edit-textarea">${escapeHtml(fullContent || '')}</textarea>
               <div class="note-edit-actions">
                 <button class="note-save-btn" onclick="event.stopPropagation();saveEditNote('${escapeAttr(n.id)}')">${t('note.save') || '保存'}</button>
                 <button class="note-cancel-btn" onclick="event.stopPropagation();cancelEditNote()">${t('note.cancel') || '取消'}</button>
@@ -2450,7 +2731,7 @@ function renderNotes() {
             </div>`;
           }
           return `<div class="note-content-full">
-            <div class="note-content-text">${escapeHtml(n.content || t('note.contentMissing'))}</div>
+            <div class="note-content-text">${escapeHtml(fullContent || (n.contentLength ? t('note.contentMissing') : ''))}</div>
             <div class="note-edit-actions">
               <button class="note-edit-btn" onclick="event.stopPropagation();startEditNote('${escapeAttr(n.id)}')">${t('note.edit') || '编辑'}</button>
             </div>
@@ -2461,10 +2742,11 @@ function renderNotes() {
           ${topicBadge}
           <span class="note-source-tag">${escapeHtml(n.source || 'Chat extracted')}</span>
           ${whenHtml}
+          ${n.signal ? '<span class="note-signal-badge ' + escapeAttr(n.signal) + '">' + (n.signal === 'health_negative' ? (lang === 'zh' ? '健康' : 'Health') : n.signal === 'emotional_stress' ? (lang === 'zh' ? '情绪' : 'Emotion') : '✓') + '</span>' : ''}
         </div>
       </div>
     `;
-  }).join('');
+  }).join('') + renderMoreButton('notes', shown.length, sorted.length);
   // Auto-focus textarea when editing
   if (editingNoteId) {
     const ta = document.getElementById('note-edit-textarea-' + editingNoteId);
@@ -2485,7 +2767,20 @@ function formatNoteWhen(n) {
 // ===== Note Edit =====
 let editingNoteId = null;
 
-function startEditNote(noteId) {
+async function ensureNoteDetail(noteId) {
+  const cached = noteDetails.get(noteId);
+  if (cached) return cached;
+  const data = await fetchJson(`/api/note?noteId=${encodeURIComponent(noteId)}`);
+  if (data?.note) {
+    noteDetails.set(noteId, data.note);
+    return data.note;
+  }
+  return null;
+}
+
+async function startEditNote(noteId) {
+  const detail = await ensureNoteDetail(noteId);
+  if (!detail) return;
   editingNoteId = noteId;
   renderNotes();
 }
@@ -2502,14 +2797,21 @@ async function saveEditNote(noteId) {
   if (!content) return;
   const result = await runAction('/api/note/update', { noteId, content }, 'Note updated');
   if (!result) return;
+  const cached = noteDetails.get(noteId);
+  if (cached) noteDetails.set(noteId, { ...cached, content, updatedAt: result.note?.updatedAt || cached.updatedAt });
   editingNoteId = null;
   await refreshState();
   renderNotes();
 }
 
-function toggleNoteExpand(id) {
-  if (expandedNotes.has(id)) expandedNotes.delete(id);
-  else expandedNotes.add(id);
+async function toggleNoteExpand(id) {
+  if (expandedNotes.has(id)) {
+    expandedNotes.delete(id);
+  } else {
+    const detail = await ensureNoteDetail(id);
+    if (!detail) return;
+    expandedNotes.add(id);
+  }
   renderNotes();
 }
 
@@ -2651,13 +2953,15 @@ async function confirmAddNote() {
   renderAll();
 }
 
-// Legacy alias — kept for any external callers
-async function addNoteFromForm() { openNoteModal(); }
 
 
-
-function openNoteFromKnowledge(noteId) {
+async function openNoteFromKnowledge(noteId) {
   showView('all');
+  currentNoteTab = '__all';
+  visibleCounts.notes = PAGE_SIZE.notes;
+  document.querySelectorAll('.note-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.topic === '__all'));
+  const detail = await ensureNoteDetail(noteId);
+  if (!detail) return;
   expandedNotes.add(noteId);
   renderNotes();
   document.getElementById('section-notes')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -2672,50 +2976,6 @@ function translateTaskTitle(title) {
   const phaseMatch = title.match(/^\[(.+?)\]\s*(.+)$/);
   if (phaseMatch) return t('task.phase', { phase: phaseMatch[1], title: phaseMatch[2] });
   return title;
-}
-
-// ===== Related Notes (mem.ai-style auto-push) =====
-// Shows the most recent notes from the second brain, ordered by recency.
-// When the AI calls zhigui_get_context, the relevant notes are pushed to the user
-// via the conversation; this panel provides a visual snapshot.
-function renderRelatedNotes() {
-  const container = document.getElementById('related-notes-container');
-  if (!container) return;
-  const allNotes = Array.isArray(state.notes) ? state.notes.slice() : [];
-  // Sort by recency (most recent first)
-  allNotes.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-
-  // Show the 5 most recent notes
-  const recent = allNotes.slice(0, 5);
-  const meta = document.getElementById('related-notes-meta');
-  if (meta) meta.textContent = recent.length > 0 ? `${recent.length} recent` : '';
-
-  if (recent.length === 0) {
-    container.innerHTML = '<div class="empty-state">' + (t('empty.relatedNotes') || 'No notes yet — the AI will auto-capture insights as you converse') + '</div>';
-    return;
-  }
-
-  // Find topic labels for notes that have topicId
-  const topicLabels = {};
-  if (state.topicIndex) {
-    for (const t of state.topicIndex) topicLabels[t.id] = t.label;
-  }
-  if (state.topics) {
-    for (const t of state.topics) {
-      topicLabels[t.id] = t.label;
-    }
-  }
-
-  container.innerHTML = recent.map(n => {
-    const time = n.relatedDate ? formatNoteWhen(n) : formatDateTime(n.createdAt);
-    const timeTitle = n.relatedDate ? t('note.when.tooltip') : t('note.created.tooltip');
-    const topicLabel = n.topicId && topicLabels[n.topicId] ? topicLabels[n.topicId] : '未分类';
-    const topicBadge = `<span class="related-note-topic">${escapeHtml(topicLabel)}</span>`;
-    return `<div class="related-note-card" onclick="showView('all'); setTimeout(() => toggleNoteExpand('${escapeAttr(n.id)}'), 0)">
-      <div class="related-note-meta">${topicBadge} <span class="related-note-time" title="${timeTitle}">${escapeHtml(time)}</span></div>
-      <div class="related-note-content">${escapeHtml(n.title || t('note.pendingTitle'))}</div>
-    </div>`;
-  }).join('');
 }
 
 // ===== Utility Functions =====
@@ -2746,31 +3006,87 @@ function escapeAttr(str) {
 
 // ===== Interaction: Delete Goal/Constraint =====
 async function deleteGoal(type, id, title) {
-  if (!confirm(t('confirm.deleteGoal', { title }))) return;
-  const result = await runAction('/api/delete-goal', { type, id }, 'Goal deleted');
-  if (!result) return;
-  await refreshState();
-  invalidateTodayBriefing();
-  renderAll();
+  await requestEntityDelete('goal', { id, goalType: type }, title);
 }
 
 // ===== Interaction: Errand Management =====
 async function toggleErrand(id) {
-  const result = await runAction('/api/errand/complete', { id }, 'Errand updated');
-  if (!result) return;
+  const result = await postJson('/api/errand/complete', { id });
+  // 无论成功还是已完成，都刷新状态重新渲染（completedActions 中的 errand 会从列表消失）
+  if (result && result.success === false && result.code === 'ALREADY_DONE') {
+    // errand 已完成（可能因双击或竞态），静默刷新即可
+    await refreshState();
+    renderAll();
+    return;
+  }
+  if (!result || result.success === false || result.error) return;
   await refreshState();
   renderAll();
+}
+
+async function undoCompleteErrand(actionId) {
+  const result = await postJson('/api/errand/undo', { actionId });
+  if (!result || result.success === false || result.error) {
+    if (result && result.error) showToast(result.error, 'error');
+    return;
+  }
+  await refreshState();
+  renderAll();
+}
+
+async function restoreCompletedTask(date, taskId) {
+  if (!date || !taskId) {
+    showToast(lang === 'zh' ? '该历史任务缺少原始日期，无法恢复' : 'This completed task has no original date to restore.', 'error');
+    return;
+  }
+  await toggleTask(date, taskId);
 }
 
 function requestTaskDelete(date, id, title) {
   requestActionDelete('task', id, title, date);
 }
 
-function requestActionDelete(kind, id, title, date = '') {
-  pendingActionDelete = { kind, id, title, date };
+async function requestActionDelete(kind, id, title, date = '') {
+  const payload = kind === 'task' ? { date, taskId: id } : { id };
+  await requestEntityDelete(kind, payload, title);
+}
+
+function deletionImpactHtml(preview) {
+  const labels = {
+    scheduleTasks: lang === 'zh' ? '日程' : 'schedule items',
+    recurringPreviews: lang === 'zh' ? '周期预排' : 'recurring previews',
+    errands: lang === 'zh' ? '待安排事项' : 'actions',
+    completedActions: lang === 'zh' ? '完成记录' : 'completed records',
+    decisions: lang === 'zh' ? '决策记录' : 'decision records',
+    followUps: lang === 'zh' ? '后续提醒' : 'follow-ups',
+    notes: lang === 'zh' ? '笔记' : 'notes',
+    preservedActionItems: lang === 'zh' ? '保留的行动' : 'preserved actions',
+    preservedGoals: lang === 'zh' ? '保留的目标' : 'preserved goals',
+  };
+  const rows = Object.entries(preview?.impact || {})
+    .filter(([, count]) => Number(count) > 0)
+    .map(([key, count]) => `<div class="prev-item"><div class="prev-num">${Number(count)}</div><div class="prev-label">${escapeHtml(labels[key] || key)}</div></div>`);
+  const taskSamples = preview?.samples?.scheduleTasks || [];
+  const sample = taskSamples.length
+    ? `<div class="prev-detail"><b>${lang === 'zh' ? '受影响日程：' : 'Affected schedule: '}</b>${taskSamples.map(item => escapeHtml(item.title || item.id)).join('、')}</div>`
+    : '';
+  const hint = lang === 'zh'
+    ? '删除后会立即清理上述实体中的失效关联；此操作不可撤销。'
+    : 'Deletion immediately removes the affected stale links and cannot be undone.';
+  return `${rows.length ? `<div class="topic-delete-preview">${rows.join('')}</div>` : ''}${sample}<div class="topic-delete-warn">${hint}</div>`;
+}
+
+async function requestEntityDelete(entityType, payload, title) {
+  const preview = await postJson('/api/delete/preview', { entityType, ...payload });
+  if (!preview || preview.success === false || preview.error) return;
+  pendingActionDelete = { entityType, payload, title };
   const name = document.getElementById('action-delete-name');
+  const heading = document.getElementById('action-delete-title');
+  const impact = document.getElementById('action-delete-impact');
   const modal = document.getElementById('action-delete-modal');
   if (name) name.textContent = title;
+  if (heading) heading.textContent = lang === 'zh' ? '确认删除' : 'Confirm deletion';
+  if (impact) impact.innerHTML = deletionImpactHtml(preview);
   if (modal) modal.style.display = '';
 }
 
@@ -2784,11 +3100,19 @@ function closeActionDeleteModal(event) {
 async function confirmActionDelete() {
   const pending = pendingActionDelete;
   if (!pending) return;
-  const isTask = pending.kind === 'task';
+  const routes = {
+    task: { url: '/api/task/delete', body: pending.payload },
+    errand: { url: '/api/errand/delete', body: pending.payload },
+    note: { url: '/api/note/delete', body: pending.payload },
+    decision: { url: '/api/decision/delete', body: pending.payload },
+    goal: { url: '/api/delete-goal', body: { id: pending.payload.id, type: pending.payload.goalType } },
+  };
+  const route = routes[pending.entityType];
+  if (!route) return;
   const result = await runAction(
-    isTask ? '/api/task/delete' : '/api/errand/delete',
-    isTask ? { date: pending.date, taskId: pending.id } : { id: pending.id },
-    t('modal.actionDelete.btn'),
+    route.url,
+    route.body,
+    lang === 'zh' ? '已删除并清理关联' : 'Deleted and references cleaned',
   );
   if (!result) return;
   closeActionDeleteModal();
@@ -2800,22 +3124,22 @@ function deleteErrand(id, title) {
   requestActionDelete('errand', id, title);
 }
 
-// ===== Interaction: Delete Note (panel delete is non-cascade) =====
-async function deleteNote(noteId, content) {
-  if (!confirm(t('confirm.deleteNote'))) return;
-  const result = await runAction('/api/note/delete', { noteId }, 'Note deleted');
-  if (!result) return;
-  await refreshState();
-  renderAll();
+// ===== Interaction: Delete Note (removes stale action/decision references too) =====
+async function deleteNote(noteId, title) {
+  await requestEntityDelete('note', { noteId }, title);
+}
+
+async function deleteDecision(id, title) {
+  await requestEntityDelete('decision', { id }, title);
 }
 
 function showAddErrandForm() {
-  const today = formatDate(getOffsetDate(currentDayOffset));
+  const today = formatDate(getViewedDate());
   document.getElementById('errand-date').value = today;
   document.getElementById('errand-time').value = '';
   document.getElementById('errand-title').value = '';
   document.getElementById('errand-duration').value = '60';
-  document.getElementById('errand-priority').value = 'should';
+  document.getElementById('errand-commitment').value = 'should';
   document.getElementById('errand-note').value = '';
   document.getElementById('errand-modal').style.display = '';
   setTimeout(() => document.getElementById('errand-title').focus(), 100);
@@ -2831,7 +3155,7 @@ async function confirmAddErrand() {
   const date = document.getElementById('errand-date').value;
   const time = document.getElementById('errand-time').value;
   const duration = parseInt(document.getElementById('errand-duration').value) || 60;
-  const priority = document.getElementById('errand-priority').value;
+  const commitmentLevel = document.getElementById('errand-commitment').value;
   const note = document.getElementById('errand-note').value.trim();
   
   if (!title) {
@@ -2839,7 +3163,7 @@ async function confirmAddErrand() {
     return;
   }
   
-  const result = await runAction('/api/errand/add', { title, date, time, duration, priority, note }, 'Errand added');
+  const result = await runAction('/api/errand/add', { title, date, time, duration, commitmentLevel, note }, 'Errand added');
   if (!result) return;
   closeErrandModal();
   await refreshState();
@@ -2917,10 +3241,14 @@ async function renderTopics() {
   if (th) th.textContent = '';
   if (!data || !data.topics || data.topics.length === 0) {
     container.innerHTML = '<div class="topics-empty">' + t('topic.empty') + '</div>';
+    const filter = document.getElementById('kb-category-filter');
+    if (filter) {
+      filter.innerHTML = '<option value="">' + (t('kb.category.all') || 'All Categories') + ' (0)</option>';
+    }
     return;
   }
 
-  // Keep a global topic label cache for the Life Notes view
+  // Keep a global topic label cache for the Notes view
   for (const tp of data.topics) topicMap[tp.id] = tp;
 
   // Update category filter dropdown
@@ -2945,7 +3273,8 @@ async function renderTopics() {
   // Get active filter
   const activeFilter = filter ? filter.value : '';
 
-  // Group topics by category
+  // Group topics by category, then show a bounded cross-category page.  The
+  // knowledge index remains complete in storage; the panel does not grow with it.
   const grouped = new Map();
   for (const tp of data.topics) {
     const cat = tp.category || 'Other';
@@ -2954,33 +3283,54 @@ async function renderTopics() {
     grouped.get(cat).push(tp);
   }
 
+  // Topics use the same bounded paging state as every other list.  Without an
+  // initial value, Array#slice receives `undefined`, renders no cards for most
+  // categories, and leaves misleading category headers behind.
+  const visibleTopicLimit = Number.isFinite(visibleCounts.topics) && visibleCounts.topics > 0
+    ? visibleCounts.topics
+    : PAGE_SIZE.topics;
+  let remainingTopicSlots = visibleTopicLimit;
+  let visibleTopicTotal = 0;
+
   // Render grouped: Category header + topic cards
   let html = '';
   const unclassified = data.unclassifiedNotes || [];
-  if (unclassified.length) {
+  if (unclassified.length && remainingTopicSlots > 0) {
+    const unclassifiedShown = unclassified.slice(0, Math.max(0, remainingTopicSlots));
+    remainingTopicSlots -= unclassifiedShown.length;
+    visibleTopicTotal += unclassifiedShown.length;
     html += `<div class="topic-category-group unclassified-group">`;
     html += `<div class="topic-category-header"><span class="topic-category-name">${t('note.tab.unclassified')}</span><span class="topic-category-meta">${t('topic.unclassified.meta', { n: unclassified.length })}</span></div>`;
-    html += `<div class="unclassified-note-list">${unclassified.map(note => `
+    html += `<div class="unclassified-note-list">${unclassifiedShown.map(note => `
       <button type="button" class="unclassified-note" onclick="openNoteFromKnowledge('${escapeAttr(note.id)}')">
         <span class="tree-caret">▸</span><span>${escapeHtml(note.title || t('note.pendingTitle'))}</span>
       </button>`).join('')}</div>`;
     html += `</div>`;
   }
   for (const [cat, topics] of grouped) {
+    if (remainingTopicSlots <= 0) break;
     const totalNotes = topics.reduce((s, t) => s + (t.noteCount || 0), 0);
+    const visibleTopics = topics.slice().sort((a, b) => b.noteCount - a.noteCount).slice(0, remainingTopicSlots);
+    remainingTopicSlots -= visibleTopics.length;
+    visibleTopicTotal += visibleTopics.length;
+    // Do not render a category heading if its cards are deferred to a later
+    // page; a header with no clickable topic is a dead end for the user.
+    if (!visibleTopics.length) continue;
     html += `<div class="topic-category-group">`;
     html += `<div class="topic-category-header">`;
     html += `<span class="topic-category-name">${escapeHtml(cat)}</span>`;
     html += `<span class="topic-category-meta">${topics.length} topics · ${totalNotes} notes</span>`;
     html += `</div>`;
-    topics.sort((a, b) => b.noteCount - a.noteCount);
-    html += topics.map(topicCardHtml).join('');
+    html += visibleTopics.map(topicCardHtml).join('');
     html += `</div>`;
   }
-  container.innerHTML = html || '<div class="topics-empty">' + (t('topic.empty') || 'No topics') + '</div>';
+  const totalDisplayItems = [...grouped.values()].reduce((total, topics) => total + topics.length, 0) + unclassified.length;
+  container.innerHTML = (html || '<div class="topics-empty">' + (t('topic.empty') || 'No topics') + '</div>')
+    + renderMoreButton('topics', visibleTopicTotal, totalDisplayItems);
 }
 
 function filterTopicsByCategory(cat) {
+  visibleCounts.topics = PAGE_SIZE.topics;
   renderTopics();
 }
 
@@ -3028,11 +3378,6 @@ async function loadTopicDetail(topicId) {
   renderTopicTree(topicId);
 }
 
-async function switchTopicTab(topicId, tab) {
-  // Retained for backward compatibility; the containment tree no longer uses tabs.
-  if (!topicDetailCache[topicId]) await loadTopicDetail(topicId);
-}
-
 // ===== Topic containment tree: topic(琐事, 笔记, goal(tasks)) =====
 // Front-end of the backend file tree. A topic owns notes + errands + goals, and
 // each goal owns its derived schedule tasks. Every node is expandable on click.
@@ -3053,7 +3398,7 @@ function renderTopicTree(topicId) {
 
   let html = '';
 
-  // —— 笔记 group (click a note → expand full content) ——
+  // —— 笔记 group (title-only; the full body opens in the Notes view) ——
   html += `<div class="tree-group">
     <div class="tree-group-head"><span class="tree-ico">📝</span>${t('topic.rel.notes')}<span class="tree-cnt">${notes.length}</span></div>
     <div class="tree-group-body">`;
@@ -3064,13 +3409,12 @@ function renderTopicTree(topicId) {
         ? `<span class="tree-note-time" title="${n.relatedDate ? t('note.when.tooltip') : t('note.created.tooltip')}">${escapeHtml(n.relatedDate ? formatNoteWhen(n) : formatDateTime(n.createdAt))}</span>`
         : '';
       const src = n.source === 'manual' ? `<span class="topic-note-src manual">${t('topic.note.src.manual')}</span>` : (n.source ? `<span class="topic-note-src">${t('topic.note.src.conv')}</span>` : '');
-      return `<div class="tree-note" onclick="toggleTopicNote(this)">
+      return `<div class="tree-note">
         <div class="tree-note-heading">
-          <span class="tree-caret">▸</span>
           <span class="tree-note-summary${n.needsEnrichment ? ' pending' : ''}">${escapeHtml(n.title || t('note.pendingTitle'))}</span>
         </div>
         <div class="tree-note-meta">${dom}${src}${dt}</div>
-        <div class="tree-note-full">${escapeHtml(n.content || '')}</div>
+        <button type="button" class="action-context-open-note" onclick="event.stopPropagation();openNoteFromKnowledge('${escapeAttr(n.id)}')">${lang === 'zh' ? '查看完整笔记' : 'Open full note'}</button>
       </div>`;
     }).join('');
   } else {
@@ -3109,15 +3453,6 @@ function renderTopicTree(topicId) {
   container.innerHTML = html;
 }
 
-function toggleTopicNote(el) {
-  const full = el.querySelector('.tree-note-full');
-  const caret = el.querySelector('.tree-caret');
-  if (!full) return;
-  const open = full.style.display !== 'block';
-  full.style.display = open ? 'block' : 'none';
-  if (caret) caret.textContent = open ? '▾' : '▸';
-}
-
 function toggleTopicGoal(el) {
   const tasks = el.parentElement.querySelector('.tree-goal-tasks');
   const caret = el.querySelector('.tree-caret');
@@ -3151,7 +3486,8 @@ async function runKbSearch() {
     const topicLabel = h.topicLabel ? ` · <span class="kb-hit-topic">${escapeHtml(h.topicLabel)}</span>` : '';
     const tid = h.topicId ? encodeURIComponent(h.topicId) : '';
     const isTopicHit = h.type === 'topic';
-    return `<div class="kb-hit ${isTopicHit ? 'topic-hit' : ''}" onclick="kbHitClick('${escapeAttr(h.type)}','${escapeAttr(tid)}')"><span class="kb-hit-type">${typeMap[h.type] || h.type}</span>${escapeHtml((h.text || '').slice(0, 60))}${topicLabel}</div>`;
+    const label = h.title || h.snippet || h.text || '';
+    return `<div class="kb-hit ${isTopicHit ? 'topic-hit' : ''}" onclick="kbHitClick('${escapeAttr(h.type)}','${escapeAttr(tid)}')"><span class="kb-hit-type">${typeMap[h.type] || h.type}</span>${escapeHtml(label.slice(0, 60))}${topicLabel}</div>`;
   }).join('');
   // Filter topic cards: only show topics that appear in search hits
   const matchedTopicIds = new Set(data.hits.filter(h => h.type === 'topic' || h.topicId).map(h => h.topicId));
@@ -3169,7 +3505,7 @@ async function kbHitClick(type, topicIdEnc) {
   await toggleTopicExpand(topicId);
 }
 
-// Cascade delete topic and all its associations
+// Delete a topic's owned notes while preserving linked action items.
 async function requestTopicDelete(topicId, label) {
   pendingDeleteTopic = { id: topicId, label: label || '' };
   const preview = await apiPost('/api/topic/delete', { topicId, confirm: false });
@@ -3179,9 +3515,14 @@ async function requestTopicDelete(topicId, label) {
   if (prevEl) {
     if (preview && preview.counts) {
       const c = preview.counts;
-      const items = [['goals', t('topic.rel.goals'), c.goals], ['actionItems', t('topic.rel.actionItems'), c.actionItems], ['decisions', t('topic.rel.decisions'), c.decisions], ['notes', t('topic.rel.notes'), c.notes]];
+      const items = [
+        ['notes', t('topic.rel.notes'), c.notes],
+        ['preservedActionItems', lang === 'zh' ? '保留的行程/任务' : 'Preserved actions', c.preservedActionItems],
+        ['preservedGoals', lang === 'zh' ? '保留的目标' : 'Preserved goals', c.preservedGoals],
+      ];
       let html = items.map(([k, l, n]) => `<div class="prev-item"><div class="prev-num">${n || 0}</div><div class="prev-label">${l}</div></div>`).join('');
-      // Detailed cascade list (sample titles) so the user sees exactly what will be deleted
+      // The preview clearly separates notes that will be deleted from entities
+      // that will survive with their broken links removed.
       const man = preview.manifest || {};
       const detailLines = [];
       const pushDetail = (arr, key) => {
@@ -3191,10 +3532,7 @@ async function requestTopicDelete(topicId, label) {
           detailLines.push(`<div class="prev-detail"><b>${t('topic.rel.' + key)}:</b> ${sample}${more}</div>`);
         }
       };
-      pushDetail(man.goals, 'goals');
-      pushDetail(man.actionItems, 'actionItems');
       pushDetail(man.notes, 'notes');
-      pushDetail(man.decisions, 'decisions');
       if (detailLines.length) html += `<div class="prev-detail-list">${detailLines.join('')}</div>`;
       prevEl.innerHTML = html;
     } else {
@@ -3215,7 +3553,7 @@ async function confirmTopicDelete() {
   if (!pendingDeleteTopic) return;
   const result = await apiPost('/api/topic/delete', { topicId: pendingDeleteTopic.id, confirm: true });
   if (!result || result.error) return;
-  showToast('Topic and related items deleted', 'success');
+  showToast(lang === 'zh' ? '主题及其笔记已删除，关联行程已保留并清理引用' : 'Topic notes deleted; linked actions were preserved and cleaned', 'success');
   const modal = document.getElementById('topic-delete-modal');
   if (modal) modal.style.display = 'none';
   pendingDeleteTopic = null;

@@ -5,11 +5,13 @@
   "main": "skill/electron/main.js",
   "scripts": {
     "start": "electron skill/electron/main.js",
-    "dev": "electron skill/electron/main.js --dev"
+    "dev": "electron skill/electron/main.js --dev",
+    "test": "npm --prefix skill test"
   },
   "author": "",
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "devDependencies": {
+    "docx": "^9.7.1",
     "electron": "^43.1.0"
   }
 }

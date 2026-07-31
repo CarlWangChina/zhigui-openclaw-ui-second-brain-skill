@@ -3,13 +3,17 @@
   "version": "1.0.0",
   "description": "ZhiGui 知归 - Decision & Planning Companion - self-contained skill package (engine + dashboard + Electron)",
   "private": true,
+  "engines": {
+    "node": ">=17"
+  },
   "scripts": {
+    "start": "node dashboard/server.js",
     "dashboard": "node dashboard/server.js",
     "electron": "electron electron/main.js",
-    "test": "node test/integration-actions.js && node test/http-dashboard.js"
+    "test": "node test/run-all-tests.js && node test/architecture-evolution.js"
   },
   "author": "",
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "devDependencies": {
     "electron": "^43.1.0"
   }

@@ -15,6 +15,7 @@ const fs = require('fs');
 const { BrainIndex } = require('../engine/brain-index');
 // Shared persistence layer: same read/write logic as the AI/MCP process, eliminating dual-storage divergence
 const Storage = require('../engine/storage');
+const { createDashboardState } = require('../engine/dashboard-state');
 // Shared config loader: data directory shared with MCP engine / HTTP dashboard, keeping all three ends consistent
 const { loadConfig } = require('../lib/config');
 const CONFIG = loadConfig();
@@ -27,7 +28,6 @@ ensureDataInitialized(ZHIGUI_DIR);
 Storage.setDataDir(ZHIGUI_DIR);
 const Actions = require('../engine/actions');
 Actions.configure(ZHIGUI_DIR);
-const STATE_FILE = path.join(ZHIGUI_DIR, 'state.json');
 const HISTORY_FILE = path.join(ZHIGUI_DIR, 'history.json');
 const PUBLIC_DIR = path.join(__dirname, '..', 'dashboard', 'public');
 
@@ -53,14 +53,6 @@ function getBrainIndex() {
   return brainIndex;
 }
 
-function writeJson(filePath, data) {
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
-}
-
-function genId(prefix) {
-  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
 // Save the current window position
 function saveBounds() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -71,34 +63,9 @@ function saveBounds() {
 // Explicitly save window position
 function saveBoundsExplicit(x, y, w, h) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  const st = readJson(STATE_FILE) || {};
-  st.meta = st.meta || {};
-  st.meta.windowBounds = {
-    x: Math.round(x), y: Math.round(y),
-    width: Math.round(w), height: Math.round(h)
-  };
-  writeJson(STATE_FILE, st);
-}
-
-// ===== Ensure data files exist =====
-function ensureDataFiles() {
-  if (!fs.existsSync(ZHIGUI_DIR)) {
-    fs.mkdirSync(ZHIGUI_DIR, { recursive: true });
-  }
-  if (!fs.existsSync(STATE_FILE)) {
-    writeJson(STATE_FILE, {
-      meta: { theme: 'dark', lastUpdated: new Date().toISOString() },
-      strategicGoals: [],
-      constraints: [],
-      currentGoals: [],
-      schedule: { days: {} },
-      conflicts: [],
-      morningBriefing: null
-    });
-  }
-  if (!fs.existsSync(HISTORY_FILE)) {
-    writeJson(HISTORY_FILE, { conversations: [], meta: {} });
-  }
+  Actions.execute('window.presentation.set', {
+    bounds: { x, y, width: w, height: h },
+  });
 }
 
 // ===== Compute expanded width based on screen size =====
@@ -114,12 +81,35 @@ function getExpandedWidth(workArea) {
 function createWindow() {
   const workArea = screen.getPrimaryDisplay().workArea;
   expandedWidth = getExpandedWidth(workArea);
+  const savedState = Storage.readFullState() || {};
+  const savedBounds = savedState.meta?.windowBounds;
+  const restoreCollapsed = savedState.meta?.collapsed === true;
+  const canRestoreBounds = savedBounds && ['x', 'y', 'width', 'height']
+    .every(key => Number.isFinite(Number(savedBounds[key]))) &&
+    Number(savedBounds.width) >= COLLAPSED_W && Number(savedBounds.height) >= COLLAPSED_H;
 
-  // Always start expanded: full dashboard panel at right edge
-  const initW = expandedWidth;
-  const initH = workArea.height;
-  const initX = Math.round(workArea.x + workArea.width - expandedWidth);
-  const initY = workArea.y;
+  // The persisted presentation mode is authoritative.  A collapsed window
+  // must reopen as the mini control, never as a full dashboard squeezed into
+  // its saved 56×56 bounds.  Conversely, an expanded panel always gets its
+  // current full-height layout instead of inheriting stale mini bounds.
+  const initW = restoreCollapsed
+    ? COLLAPSED_W
+    : (canRestoreBounds && Number(savedBounds.width) > COLLAPSED_W ? Math.min(Math.round(savedBounds.width), workArea.width) : expandedWidth);
+  const initH = restoreCollapsed
+    ? COLLAPSED_H
+    : (canRestoreBounds && Number(savedBounds.height) > COLLAPSED_H ? Math.min(Math.round(savedBounds.height), workArea.height) : workArea.height);
+  const defaultX = Math.round(workArea.x + workArea.width - expandedWidth);
+  const defaultY = workArea.y;
+  const initX = restoreCollapsed
+    ? Math.round(workArea.x + workArea.width - COLLAPSED_W - MINI_MARGIN)
+    : canRestoreBounds
+    ? Math.max(workArea.x, Math.min(Math.round(savedBounds.x), workArea.x + workArea.width - initW))
+    : defaultX;
+  const initY = restoreCollapsed
+    ? Math.round(workArea.y + workArea.height - COLLAPSED_H - MINI_MARGIN)
+    : canRestoreBounds
+    ? Math.max(workArea.y, Math.min(Math.round(savedBounds.y), workArea.y + workArea.height - initH))
+    : defaultY;
 
   mainWindow = new BrowserWindow({
     width: Math.round(initW),
@@ -148,8 +138,8 @@ function createWindow() {
   // Load the dashboard page
   mainWindow.loadFile(path.join(PUBLIC_DIR, 'index.html'));
 
-  // Always-on-top state: restore from state.json, default not on top
-  const savedState = readJson(STATE_FILE) || {};
+  // Window preferences use the same transactional state path as every other
+  // panel mutation; state.json is only a fallback projection now.
   const savedPin = savedState.meta?.alwaysOnTop === true;
   mainWindow.setAlwaysOnTop(savedPin, 'floating', 1);
 
@@ -167,7 +157,13 @@ function createWindow() {
         label: 'Always on Top',
         type: 'checkbox',
         checked: isOnTop,
-        click: (item) => mainWindow.setAlwaysOnTop(item.checked, 'floating', 1)
+        click: (item) => {
+          mainWindow.setAlwaysOnTop(item.checked, 'floating', 1);
+          try {
+            Actions.execute('window.presentation.set', { alwaysOnTop: item.checked });
+          } catch (e) { /* ignore */ }
+          mainWindow.webContents.send('pin-state-changed', item.checked);
+        }
       },
       { type: 'separator' },
       {
@@ -178,8 +174,10 @@ function createWindow() {
     menu.popup();
   });
 
-  mainWindow.on('closed', () => {
+  mainWindow.on('close', () => {
     try { saveBounds(); } catch (e) {}
+  });
+  mainWindow.on('closed', () => {
     mainWindow = null;
   });
 }
@@ -192,12 +190,10 @@ ipcMain.handle('toggle-pin', () => {
   const isOnTop = mainWindow.isAlwaysOnTop();
   const newTop = !isOnTop;
   mainWindow.setAlwaysOnTop(newTop, 'floating', 1);
-  // Persist
+  // Persist through the shared command layer so a window preference cannot
+  // overwrite a concurrent task/note mutation.
   try {
-    const st = readJson(STATE_FILE) || {};
-    st.meta = st.meta || {};
-    st.meta.alwaysOnTop = newTop;
-    writeJson(STATE_FILE, st);
+    Actions.execute('window.presentation.set', { alwaysOnTop: newTop });
   } catch (e) { /* ignore */ }
   return { alwaysOnTop: newTop };
 });
@@ -217,7 +213,7 @@ ipcMain.handle('get-state', () => {
   try {
     topicIndex = getBrainIndex().getTopics().map(topic => ({ id: topic.id, label: topic.label }));
   } catch {}
-  return { ...state, topicIndex };
+  return createDashboardState(state, topicIndex);
 });
 
 // Read history
@@ -228,37 +224,11 @@ ipcMain.handle('get-history', () => {
 // Toggle task completion
 ipcMain.handle('toggle-task', (event, { date, taskId }) => {
   return Actions.execute('task.toggle', { date, taskId });
-  const state = Storage.readFullState();
-  const day = state.schedule?.days?.[date];
-  if (!day) return { error: 'Date not found' };
-
-  const task = day.tasks.find(t => t.id === taskId);
-  if (!task) return { error: 'Task not found' };
-
-  task.completed = !task.completed;
-  state.meta = state.meta || {};
-  state.meta.lastUpdated = new Date().toISOString();
-  Storage.writeState(state);
-
-  return { success: true, completed: task.completed };
 });
 
 // Update task time/duration (manual lock)
 ipcMain.handle('update-task', (event, { date, taskId, time, duration }) => {
   return Actions.execute('task.update', { date, taskId, time, duration });
-  const state = Storage.readFullState();
-  const day = state.schedule?.days?.[date];
-  if (!day) return { error: 'Date not found' };
-  const task = day.tasks.find(t => t.id === taskId);
-  if (!task) return { error: 'Task not found' };
-  if (time !== undefined) task.time = time;
-  if (duration !== undefined) task.duration = duration;
-  task.manualLocked = true;
-  task.manualLockedAt = new Date().toISOString();
-  state.meta = state.meta || {};
-  state.meta.lastUpdated = new Date().toISOString();
-  Storage.writeState(state);
-  return { success: true, task };
 });
 
 // Delete one scheduled task without affecting the rest of that day.
@@ -269,146 +239,21 @@ ipcMain.handle('delete-task', (event, payload) => {
 // Unlock task (remove manual lock)
 ipcMain.handle('unlock-task', (event, { date, taskId }) => {
   return Actions.execute('task.unlock', { date, taskId });
-  const state = Storage.readFullState();
-  const day = state.schedule?.days?.[date];
-  if (!day) return { error: 'Date not found' };
-  const task = day.tasks.find(t => t.id === taskId);
-  if (!task) return { error: 'Task not found' };
-  task.manualLocked = false;
-  delete task.manualLockedAt;
-  state.meta = state.meta || {};
-  state.meta.lastUpdated = new Date().toISOString();
-  Storage.writeState(state);
-  return { success: true, task };
-});
-
-// Update priority (and lock it)
-ipcMain.handle('update-priority', (event, { type, id, priority }) => {
-  return Actions.execute('priority.update', { type, id, priority });
-  const state = Storage.readFullState();
-  let target = null;
-  let list = null;
-
-  if (type === 'strategicGoal') list = state.strategicGoals;
-  else if (type === 'constraint') list = state.constraints;
-  else if (type === 'currentGoal') list = state.currentGoals;
-  else if (type === 'task') {
-    const days = state.schedule?.days || {};
-    for (const d of Object.values(days)) {
-      const t = d.tasks?.find(t => t.id === id);
-      if (t) { target = t; break; }
-    }
-  }
-
-  if (!target && list) {
-    target = list.find(item => item.id === id);
-  }
-
-  if (!target) return { error: 'Target not found' };
-
-  target.priority = Math.max(0, Math.min(100, parseInt(priority)));
-  target.locked = true;
-  target.updatedAt = new Date().toISOString();
-
-  state.meta = state.meta || {};
-  state.meta.lastUpdated = new Date().toISOString();
-  // Go through the shared persistence layer: synchronously write back to split documents + state.json
-  // so the AI can see the panel edits
-  Storage.writeState(state);
-
-  return { success: true, priority: target.priority, locked: true };
-});
-
-// Unlock priority
-ipcMain.handle('unlock-priority', (event, { type, id }) => {
-  return Actions.execute('priority.unlock', { type, id });
-  const state = Storage.readFullState();
-  let list = null;
-  if (type === 'strategicGoal') list = state.strategicGoals;
-  else if (type === 'constraint') list = state.constraints;
-  else if (type === 'currentGoal') list = state.currentGoals;
-
-  if (list) {
-    const item = list.find(i => i.id === id);
-    if (item) {
-      item.locked = false;
-      item.updatedAt = new Date().toISOString();
-      state.meta = state.meta || {};
-      state.meta.lastUpdated = new Date().toISOString();
-      // Go through the shared persistence layer: synchronously write back to split documents + state.json
-      // so the AI can see the panel edits
-      Storage.writeState(state);
-      return { success: true, locked: false };
-    }
-  }
-
-  return { error: 'Target not found' };
 });
 
 // Manually add an event
 ipcMain.handle('add-event', (event, { date, time, title, description, category }) => {
   return Actions.execute('event.add', { date, time, title, description, category });
-  const state = Storage.readFullState();
-  state.schedule = state.schedule || { days: {} };
-  state.schedule.days = state.schedule.days || {};
-
-  if (!state.schedule.days[date]) {
-    const d = new Date(date);
-    const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    state.schedule.days[date] = { date, weekday: weekdays[d.getDay()], tasks: [] };
-  }
-
-  const newTask = {
-    id: genId('t'),
-    time: time || '00:00',
-    duration: 60,
-    title: title || 'New event',
-    description: description || '',
-    priority: 50,
-    completed: false,
-    source: 'manual',
-    category: category || 'event'
-  };
-
-  state.schedule.days[date].tasks.push(newTask);
-  state.schedule.days[date].tasks.sort((a, b) => a.time.localeCompare(b.time));
-
-  state.meta = state.meta || {};
-  state.meta.lastUpdated = new Date().toISOString();
-  // Go through the shared persistence layer: synchronously write back to split documents + state.json
-  // so the AI can see the panel edits
-  Storage.writeState(state);
-
-  // Record into the audit stream.
-  try {
-    eventEngine.recordManualEvent({ kind: 'event', summary: title, detail: description, meta: { type: 'event', date, time, category } });
-  } catch (e) { console.warn('[ZhiGui] Event write failed:', e.message); }
-
-  return { success: true, task: newTask };
 });
 
 // Set theme
 ipcMain.handle('set-theme', (event, { theme }) => {
   return Actions.execute('theme.set', { theme });
-  const state = Storage.readFullState();
-  state.meta = state.meta || {};
-  state.meta.theme = theme;
-  state.meta.lastUpdated = new Date().toISOString();
-  Storage.writeState(state);
-
-  // setBackgroundColor cannot be used in transparent mode; theme color is handled by CSS
-  return { success: true };
 });
 
 // Set language preference (persisted to state.json)
 ipcMain.handle('set-lang', (event, { lang }) => {
   return Actions.execute('lang.set', { lang });
-  const state = Storage.readFullState();
-  state.meta = state.meta || {};
-  state.meta.lang = lang;
-  state.meta.lastUpdated = new Date().toISOString();
-  Storage.writeState(state);
-  return { success: true };
 });
 
 // Collapse/expand window — simple two-state toggle:
@@ -419,15 +264,14 @@ ipcMain.handle('toggle-collapse', (event, collapsed) => {
   if (!mainWindow || mainWindow.isDestroyed()) return { error: 'No window' };
 
   const workArea = screen.getPrimaryDisplay().workArea;
-  const state = Storage.readFullState();
-  state.meta = state.meta || {};
+  let bounds;
 
   if (collapsed) {
     // Collapse: small mini icon at bottom-right corner (above taskbar)
     const cx = Math.round(workArea.x + workArea.width - COLLAPSED_W - MINI_MARGIN);
     const cy = Math.round(workArea.y + workArea.height - COLLAPSED_H - MINI_MARGIN);
     mainWindow.setBounds({ x: cx, y: cy, width: COLLAPSED_W, height: COLLAPSED_H });
-    saveBoundsExplicit(cx, cy, COLLAPSED_W, COLLAPSED_H);
+    bounds = { x: cx, y: cy, width: COLLAPSED_W, height: COLLAPSED_H };
   } else {
     // Expand: full dashboard panel at right edge
     const width = getExpandedWidth(workArea);
@@ -435,80 +279,17 @@ ipcMain.handle('toggle-collapse', (event, collapsed) => {
     const py = Math.round(workArea.y);
     const ph = Math.round(workArea.height);
     mainWindow.setBounds({ x: px, y: py, width, height: ph });
-    saveBoundsExplicit(px, py, width, ph);
+    bounds = { x: px, y: py, width, height: ph };
   }
 
-  state.meta.collapsed = collapsed;
-  Storage.writeState(state);
+  Actions.execute('window.presentation.set', { collapsed, bounds });
 
   return { success: true };
 });
 
-// Correct window position: pin the window to its target position based on current size.
-function correctWindowPosition() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  const wa = screen.getPrimaryDisplay().workArea;
-  const [cw, ch] = mainWindow.getSize();
-  const [x, y] = mainWindow.getPosition();
-  const isCollapsedNow = cw <= COLLAPSED_W + 10 && ch <= COLLAPSED_H + 10;
-  let nx, ny;
-  if (isCollapsedNow) {
-    nx = Math.round(wa.x + wa.width - COLLAPSED_W - MINI_MARGIN);
-    ny = Math.round(wa.y + wa.height - COLLAPSED_H - MINI_MARGIN);
-  } else {
-    nx = Math.round(wa.x + wa.width - cw);
-    ny = Math.round(wa.y);
-  }
-  if (nx !== x || ny !== y) mainWindow.setPosition(nx, ny);
-}
-
-// ===== Collapsed-state detection =====
-function isCollapsedSize() {
-  if (!mainWindow || mainWindow.isDestroyed()) return false;
-  const [cw, ch] = mainWindow.getSize();
-  return cw <= COLLAPSED_W + 10 && ch <= COLLAPSED_H + 10;
-}
-
 // ===== Manually add strategic goal / constraint =====
-ipcMain.handle('add-goal', (event, { type, title, description, priority }) => {
-  return Actions.execute('goal.add', { type, title, description, priority });
-  const state = Storage.readFullState();
-  const newGoal = {
-    id: genId(type === 'strategicGoal' ? 'sg' : 'c'),
-    title: title || 'New goal',
-    description: description || '',
-    priority: Math.max(0, Math.min(100, parseInt(priority) || 50)),
-    locked: true,   // Manually added ones are locked by default
-    source: 'manual',
-    createdAt: new Date().toISOString()
-  };
-
-  if (type === 'strategicGoal') {
-    state.strategicGoals = state.strategicGoals || [];
-    state.strategicGoals.push(newGoal);
-  } else if (type === 'constraint') {
-    state.constraints = state.constraints || [];
-    state.constraints.push(newGoal);
-  } else {
-    return { error: 'Unknown type' };
-  }
-
-  state.meta = state.meta || {};
-  state.meta.lastUpdated = new Date().toISOString();
-  // Go through the shared persistence layer: synchronously write back to split documents + state.json
-  // so the AI can see the panel edits
-  Storage.writeState(state);
-
-  // Record into the audit stream.
-  try {
-    eventEngine.recordManualEvent({
-      kind: type === 'strategicGoal' ? 'goal' : 'constraint',
-      summary: title, detail: description,
-      meta: { priority: newGoal.priority, locked: true }
-    });
-  } catch (e) { console.warn('[ZhiGui] Event write failed:', e.message); }
-
-  return { success: true, goal: newGoal };
+ipcMain.handle('add-goal', (event, { type, title, description }) => {
+  return Actions.execute('goal.add', { type, title, description });
 });
 
 ipcMain.handle('complete-goal', (event, payload) => {
@@ -524,105 +305,61 @@ ipcMain.handle('update-errand', (event, payload) => {
 });
 
 // ===== Delete strategic goal / constraint / current goal =====
-// Replicates dashboard/server.js handleDeleteGoal: removes the item from the corresponding
-// list, cascades deletion of related tasks in the schedule, then writes back through the
-// shared persistence layer.
 ipcMain.handle('delete-goal', (event, { type, id }) => {
   return Actions.execute('goal.delete', { type, id });
-  const state = Storage.readFullState();
-  let list = null;
-  if (type === 'strategicGoal') list = state.strategicGoals;
-  else if (type === 'constraint') list = state.constraints;
-  else if (type === 'currentGoal') list = state.currentGoals;
-  if (!list) {
-    return { error: 'Invalid type' };
-  }
-  const idx = list.findIndex(g => g.id === id);
-  if (idx === -1) {
-    return { error: 'Not found' };
-  }
-  const deleted = list.splice(idx, 1)[0];
-  // Cascade delete related tasks in schedule
-  if (state.schedule?.days) {
-    for (const day of Object.values(state.schedule.days)) {
-      if (day.tasks) {
-        day.tasks = day.tasks.filter(t => t.relatedGoalId !== id);
-      }
-    }
-  }
-  // Sync topic index: unbind this goal from all topics
-  try {
-    const brain = getBrainIndex();
-    brain.unlinkEntityCascade('goals', id);
-    if (deleted.topicId) { try { brain.reindexTopic(deleted.topicId); } catch {} }
-  } catch (e) { console.error('Topic index sync error (delete-goal):', e.message); }
-  state.meta = state.meta || {};
-  state.meta.lastUpdated = new Date().toISOString();
-  // Go through the shared persistence layer: synchronously write back to split documents + state.json
-  // so the AI can see the panel edits. The file watcher will push 'state-updated' to the renderer.
-  Storage.writeState(state);
-
-  return { success: true, deleted: deleted.title };
 });
 
-// ===== Mark errand complete / uncomplete =====
-// Replicates dashboard/server.js handleCompleteErrand: toggles the errand's completed flag.
+// ===== Mark errand complete =====
+// Completes an errand: moves it to completedActions log, removes from active errands.
 ipcMain.handle('complete-errand', (event, { id }) => {
-  return Actions.execute('errand.complete', { id });
-  const state = Storage.readFullState();
-  const errand = (state.errands || []).find(e => e.id === id);
-  if (!errand) {
-    return { error: 'Errand not found' };
+  try {
+    return Actions.execute('errand.complete', { id });
+  } catch (err) {
+    // errand may have already been completed (e.g. double-click or stale UI)
+    return { success: false, error: err.message, code: err.code || 'ALREADY_DONE' };
   }
-  errand.completed = !errand.completed;
-  state.meta = state.meta || {};
-  state.meta.lastUpdated = new Date().toISOString();
-  // Go through the shared persistence layer: synchronously write back to split documents + state.json
-  // so the AI can see the panel edits. The file watcher will push 'state-updated' to the renderer.
-  Storage.writeState(state);
+});
 
-  return { success: true, completed: errand.completed };
+// ===== Undo errand complete =====
+// Restores a completed action back to active errands.
+ipcMain.handle('undo-errand', (event, { actionId }) => {
+  try {
+    return Actions.execute('errand.undo', { actionId });
+  } catch (err) {
+    return { success: false, error: err.message, code: err.code || 'UNDO_FAILED' };
+  }
 });
 
 // ===== Delete errand =====
-// Replicates dashboard/server.js handleDeleteErrand: removes the errand from state.errands.
 ipcMain.handle('delete-errand', (event, { id }) => {
   return Actions.execute('errand.delete', { id });
-  const state = Storage.readFullState();
-  const idx = (state.errands || []).findIndex(e => e.id === id);
-  if (idx === -1) {
-    return { error: 'Errand not found' };
-  }
-  state.errands.splice(idx, 1);
-  // Sync topic index: unbind this errand from all topics
-  try {
-    const brain = getBrainIndex();
-    brain.unlinkEntityCascade('errands', id);
-  } catch (e) { console.error('Topic index sync error (delete-errand):', e.message); }
-  state.meta = state.meta || {};
-  state.meta.lastUpdated = new Date().toISOString();
-  // Go through the shared persistence layer: synchronously write back to split documents + state.json
-  // so the AI can see the panel edits. The file watcher will push 'state-updated' to the renderer.
-  Storage.writeState(state);
-
-  return { success: true };
 });
 
-// ===== Capture a raw note =====
-// The panel only captures the original text. AI enrichment is a separate action that
-// writes the summary title, topic and category after reading this one note on demand.
+// ===== Record a manually structured note =====
 ipcMain.handle('add-note', (event, payload) => {
   return Actions.execute('note.add', payload);
 });
 
-// Import keeps source text untouched and queues it for AI organization + user review.
-ipcMain.handle('import-notes', (event, payload) => {
-  return Actions.execute('note.import', payload);
-});
-
-// ===== Delete one note (panel delete is non-cascade) =====
+// ===== Delete one note (also removes stale action/decision references) =====
 ipcMain.handle('delete-note', (event, { noteId }) => {
   return Actions.execute('note.delete', { noteId });
+});
+
+ipcMain.handle('get-note', (event, { noteId }) => {
+  const note = Storage.getNoteDetail(noteId);
+  return note ? { note } : null;
+});
+
+ipcMain.handle('preview-delete', (event, payload) => {
+  return Actions.execute('deletion.preview', payload);
+});
+
+ipcMain.handle('decision-update', (event, payload) => {
+  return Actions.execute('decision.update', payload);
+});
+
+ipcMain.handle('decision-delete', (event, payload) => {
+  return Actions.execute('decision.delete', payload);
 });
 
 // ===== Update note content =====
@@ -630,39 +367,18 @@ ipcMain.handle('update-note', (event, { noteId, content }) => {
   return Actions.execute('note.update', { noteId, content });
 });
 
-ipcMain.handle('resolve-review', (event, payload) => {
-  return Actions.execute('review.resolve', payload);
-});
-
 // ===== Update domain weights / value system =====
-// Replicates dashboard/server.js handleUpdateWeights: merges priorities / decisionStyle /
-// learnedFrom into userProfile.valueSystem.
 ipcMain.handle('update-weights', (event, { priorities, decisionStyle, learnedFrom }) => {
   return Actions.execute('weights.update', { priorities, decisionStyle, learnedFrom });
-  const state = Storage.readFullState();
-  state.userProfile = state.userProfile || {};
-  state.userProfile.valueSystem = state.userProfile.valueSystem || {};
-  if (priorities) state.userProfile.valueSystem.priorities = priorities;
-  if (decisionStyle) state.userProfile.valueSystem.decisionStyle = decisionStyle;
-  if (learnedFrom) {
-    state.userProfile.valueSystem.learnedFrom = state.userProfile.valueSystem.learnedFrom || [];
-    state.userProfile.valueSystem.learnedFrom.push(...learnedFrom);
-  }
-  state.userProfile.updatedAt = new Date().toISOString();
-  state.meta = state.meta || {};
-  state.meta.lastUpdated = new Date().toISOString();
-  // Go through the shared persistence layer: synchronously write back to split documents + state.json
-  // so the AI can see the panel edits. The file watcher will push 'state-updated' to the renderer.
-  Storage.writeState(state);
-
-  return { success: true };
 });
 
 // ===== Topic Library IPC handlers =====
 ipcMain.handle('get-topics', () => {
   try {
     const brain = getBrainIndex();
-    const topics = brain.getTopics();
+    const topics = brain.getTopics().filter(topic =>
+      (topic.noteCount || 0) > 0 || (topic.relatedCounts?.goals || 0) > 0 || (topic.relatedCounts?.actionItems || 0) > 0
+    );
     const unclassifiedNotes = (Storage.readFullState().notes || [])
       .filter(note => note.needsEnrichment === true || !note.topicId)
       .map(note => ({ id: note.id, title: note.title || '待 AI 整理', createdAt: note.createdAt || null, source: note.source || null }));
@@ -675,45 +391,13 @@ ipcMain.handle('get-topics', () => {
 // Delete a scheduled reminder by ID
 ipcMain.handle('reminder-delete', (event, { id }) => {
   return Actions.execute('reminder.delete', { id });
-  if (!id) return { error: 'Missing reminder id' };
-  const state = Storage.readFullState();
-  state.reminders = state.reminders || [];
-  const before = state.reminders.length;
-  state.reminders = state.reminders.filter(rm => rm.id !== id);
-  if (state.reminders.length === before) return { error: 'Reminder not found' };
-  state.meta = state.meta || {};
-  state.meta.lastUpdated = new Date().toISOString();
-  const Storage = require('../engine/storage');
-  Storage.writeState(state);
-  return { success: true };
 });
 
-// Cascade delete a topic and all its associations (mirrors dashboard server handleDeleteTopic)
+// Delete only the topic-owned notes. Linked tasks, errands and goals are kept
+// and have deleted note/topic references removed by the shared action layer.
 ipcMain.handle('topic-delete', (event, { topicId, confirm }) => {
-  if (!topicId) return { error: 'Missing topicId' };
-  const brain = getBrainIndex();
-  if (confirm !== true) {
-    // Preview mode: return counts without deleting
-    try {
-      const t = brain.getTopics().find(x => x.id === topicId);
-      if (!t) return { error: 'Topic not found', preview: null };
-      return {
-        aborted: true,
-        reason: 'Not confirmed, returning preview only. Set confirm to true to execute cascade delete.',
-        preview: { label: t.label, ...t.relatedCounts, notes: t.noteCount, precipitated: t.precipitated },
-      };
-    } catch (e) {
-      return { error: e.message };
-    }
-  }
-  // Execute cascade delete
   try {
-    const result = brain.cascadeDelete(topicId);
-    // Re-read full state from hierarchy after cascade delete
-    const freshState = Storage.readFullState();
-    // Write the fresh merged state back to persistence layer so the panel sees the update
-    Storage.writeState(freshState);
-    return result;
+    return Actions.execute(confirm === true ? 'topic.delete' : 'topic.preview_delete', { topicId, confirm });
   } catch (e) {
     return { error: e.message };
   }
@@ -722,9 +406,19 @@ ipcMain.handle('topic-delete', (event, { topicId, confirm }) => {
 ipcMain.handle('get-topic', (event, { topicId }) => {
   try {
     const brain = getBrainIndex();
-    const doc = brain.getTopicDocument(topicId);
+    const doc = brain.getTopicDocument(topicId, { includeNotes: true });
     if (!doc) return null;
-    return { ...doc, noteCount: (doc.notes || []).length };
+    const notes = (doc.notes || []).map(note => ({
+      id: note.id,
+      title: note.title || null,
+      createdAt: note.createdAt || null,
+      relatedDate: note.relatedDate || null,
+      relatedTime: note.relatedTime || null,
+      domain: note.domain || null,
+      source: note.source || null,
+      needsEnrichment: !!note.needsEnrichment,
+    }));
+    return { ...doc, notes, noteCount: notes.length };
   } catch (e) {
     return null;
   }
@@ -750,25 +444,25 @@ ipcMain.handle('search', (event, { q }) => {
 
 // ===== File watching (replaces SSE) =====
 let watchDebounce = null;
+let pendingFiles = new Set();
 
 function setupFileWatcher() {
   try {
-    fs.watch(ZHIGUI_DIR, { persistent: false }, (eventType, filename) => {
+    fs.watch(ZHIGUI_DIR, { persistent: false, recursive: true }, (eventType, filename) => {
       if (!filename) return;
+      pendingFiles.add(filename);
 
       // Debounce: multiple changes within 100ms only push once
       if (watchDebounce) clearTimeout(watchDebounce);
       watchDebounce = setTimeout(() => {
         if (mainWindow && !mainWindow.isDestroyed()) {
-          if (filename === 'state.json') {
-            mainWindow.webContents.send('state-updated');
-          } else if (filename === 'history.json') {
+          if (pendingFiles.has('history.json')) {
             mainWindow.webContents.send('history-updated');
-          } else {
-            // Unknown file change, push a unified state update
-            mainWindow.webContents.send('state-updated');
           }
+          // Any file change may affect panel state — always notify
+          mainWindow.webContents.send('state-updated');
         }
+        pendingFiles.clear();
       }, 100);
     });
     console.log('[ZhiGui] File watcher started');
@@ -779,7 +473,6 @@ function setupFileWatcher() {
 
 // ===== App lifecycle =====
 app.whenReady().then(() => {
-  ensureDataFiles();
   createWindow();
   setupFileWatcher();
 

@@ -18,7 +18,9 @@ echo.
 REM ===== Get project dir (strip trailing backslash) =====
 set "APP_DIR=%~dp0"
 if "!APP_DIR:~-1!"=="\" set "APP_DIR=!APP_DIR:~0,-1!"
-set "DATA_DIR=!APP_DIR!\.zhigui"
+REM The project skill is the canonical development data store.  A root
+REM .zhigui from older releases is intentionally left untouched as a backup.
+set "DATA_DIR=!APP_DIR!\skill\.zhigui"
 set "SKILL_DIR=%USERPROFILE%\.workbuddy\skills\zhigui"
 
 echo   Project: !APP_DIR!
